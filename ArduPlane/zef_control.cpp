@@ -11,14 +11,14 @@
 
 #define HAL_USE_I2C     TRUE
 #define HAL_USE_I2S     FALSE
-extern "C" {
+/*extern "C" {
     #include <stm32f47_mcuconf.h>
     #include <stm32_registry.h>
     #include <osal.h>
     #include <stm32_dma.h>
     #include <hal_lld.h>
     #include <hal_i2c.h>
-}
+}*/
 
 #include <AP_Notify/AP_Notify.h>
 #include <AP_Notify/Display.h>
