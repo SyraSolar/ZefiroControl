@@ -1,0 +1,4 @@
+ch2 pitch laranja
+ch3 throttle amarelo
+
+roll verde
