@@ -19,6 +19,8 @@
  */
 #include "AP_Compass_RM3100.h"
 
+#if AP_COMPASS_RM3100_ENABLED
+
 #include <AP_HAL/AP_HAL.h>
 #include <utility>
 #include <AP_Math/AP_Math.h>
@@ -59,7 +61,6 @@
 #define GAIN_CC50 20.0f   // LSB/uT
 #define GAIN_CC100 38.0f
 #define GAIN_CC200 75.0f
-#define UTESLA_TO_MGAUSS   10.0f // uT to mGauss conversion
 
 #define TMRC    0x94    // Update rate 150Hz
 #define CMM     0x71    // read 3 axes and set data ready if 3 axes are ready
@@ -73,7 +74,7 @@ AP_Compass_Backend *AP_Compass_RM3100::probe(AP_HAL::OwnPtr<AP_HAL::Device> dev,
     if (!dev) {
         return nullptr;
     }
-    AP_Compass_RM3100 *sensor = new AP_Compass_RM3100(std::move(dev), force_external, rotation);
+    AP_Compass_RM3100 *sensor = NEW_NOTHROW AP_Compass_RM3100(std::move(dev), force_external, rotation);
     if (!sensor || !sensor->init()) {
         delete sensor;
         return nullptr;
@@ -242,3 +243,5 @@ void AP_Compass_RM3100::read()
 {
 	drain_accumulated_samples(compass_instance);
 }
+
+#endif  // AP_COMPASS_RM3100_ENABLED

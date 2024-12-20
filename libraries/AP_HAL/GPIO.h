@@ -19,6 +19,9 @@ public:
 class AP_HAL::PWMSource {
 public:
 
+    // Destructor detaches interrupt
+    ~PWMSource();
+
     bool set_pin(int16_t new_pin, const char *subsystem);
     int16_t pin() const { return _pin; }  // returns pin this is attached to
 
@@ -79,7 +82,7 @@ public:
     //    ret indicates the functor must return void
     //    pin is the pin which has triggered the interrupt
     //    state is the new state of the pin
-    //    timestamp is the time in microseconds the interrupt occured
+    //    timestamp is the time in microseconds the interrupt occurred
     FUNCTOR_TYPEDEF(irq_handler_fn_t, void, uint8_t, bool, uint32_t);
     virtual bool    attach_interrupt(uint8_t pin,
                                      irq_handler_fn_t fn,
@@ -110,4 +113,8 @@ public:
 
     // optional timer tick
     virtual void timer_tick(void) {};
+
+    // Run arming checks
+    virtual bool arming_checks(size_t buflen, char *buffer) const { return true; }
+
 };

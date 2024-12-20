@@ -147,7 +147,7 @@ int SITL::I2CRegisters_8Bit::rdwr(I2C::i2c_rdwr_ioctl_data *&data)
                 AP_HAL::panic("Register 0x%02x is not writable!", reg_addr);
             }
             const uint8_t register_value = data->msgs[0].buf[1+bytes_copied];
-            byte[reg_addr] = register_value;
+            rdwr_store_register_value(reg_addr, register_value);
             bytes_copied++;
         }
         return 0;
@@ -242,7 +242,7 @@ void SITL::I2CRegisters_ConfigurableLength::set_register(uint8_t reg, uint8_t va
     if (reg_data_len[reg] != 1) {
         AP_HAL::panic("Invalid set_register len");
     }
-    reg_data[reg] = value;
+    reg_data[reg] = value << 24;
 }
 
 void SITL::I2CRegisters_ConfigurableLength::set_register(uint8_t reg, int8_t value)
@@ -254,7 +254,7 @@ void SITL::I2CRegisters_ConfigurableLength::set_register(uint8_t reg, int8_t val
     if (reg_data_len[reg] != 1) {
         AP_HAL::panic("Invalid set_register len");
     }
-    reg_data[reg] = value;
+    reg_data[reg] = value << 24;
 }
 
 int SITL::I2CRegisters_ConfigurableLength::rdwr(I2C::i2c_rdwr_ioctl_data *&data)

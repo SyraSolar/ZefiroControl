@@ -1,1 +1,0 @@
-../Tools/autotest/sim_vehicle.py --map --console

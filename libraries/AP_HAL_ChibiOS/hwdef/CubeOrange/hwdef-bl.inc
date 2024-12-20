@@ -34,7 +34,7 @@ PD6 USART2_RX USART2
 PD8 USART3_TX USART3
 PD9 USART3_RX USART3
 
-# UART7 maps to uartF in the HAL (serial5 in SERIALn_ parameters).
+# UART7 maps to SERIAL5.
 PE7 UART7_RX UART7
 PE8 UART7_TX UART7
 
@@ -63,3 +63,18 @@ PA8 nVDD_5V_PERIPH_EN OUTPUT LOW
 
 # enable DFU by default
 ENABLE_DFU_BOOT 1
+
+# enable flashing from SD card:
+include sdcard.inc
+# enable FAT filesystem support (needs a microSD defined via SDMMC)
+define HAL_OS_FATFS_IO 1
+define AP_BOOTLOADER_FLASH_FROM_SD_ENABLED 1
+
+# FATFS support:
+define CH_CFG_USE_MEMCORE 1
+define CH_CFG_USE_HEAP 1
+define CH_CFG_USE_SEMAPHORES 0
+define CH_CFG_USE_MUTEXES 1
+define CH_CFG_USE_DYNAMIC 1
+define CH_CFG_USE_WAITEXIT 1
+define CH_CFG_USE_REGISTRY 1

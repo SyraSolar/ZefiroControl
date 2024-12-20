@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "AP_OSD_config.h"
+
 #include <AP_HAL/AP_HAL_Boards.h>
 #include <AP_HAL/Semaphores.h>
 #include <AP_Param/AP_Param.h>
@@ -26,26 +28,12 @@
 #include <AP_OLC/AP_OLC.h>
 #include <AP_MSP/msp.h>
 #include <AP_Baro/AP_Baro.h>
+#include <AP_RPM/AP_RPM_config.h>
 #if HAL_GCS_ENABLED
 #include <GCS_MAVLink/GCS_MAVLink.h>
 #endif
 #include <AC_Fence/AC_Fence_config.h>
-
-#ifndef OSD_ENABLED
-#define OSD_ENABLED !HAL_MINIMIZE_FEATURES
-#endif
-
-#ifndef HAL_WITH_OSD_BITMAP
-#define HAL_WITH_OSD_BITMAP OSD_ENABLED && (defined(HAL_WITH_SPI_OSD) || defined(WITH_SITL_OSD))
-#endif
-
-#ifndef OSD_PARAM_ENABLED
-#define OSD_PARAM_ENABLED !HAL_MINIMIZE_FEATURES
-#endif
-
-#ifndef HAL_OSD_SIDEBAR_ENABLE
-#define HAL_OSD_SIDEBAR_ENABLE !HAL_MINIMIZE_FEATURES
-#endif
+#include <AP_RangeFinder/AP_RangeFinder_config.h>
 
 class AP_OSD_Backend;
 class AP_MSP;
@@ -61,7 +49,18 @@ class AP_MSP;
 #define PARAM_INDEX(key, idx, group) (uint32_t(uint32_t(key) << 23 | uint32_t(idx) << 18 | uint32_t(group)))
 #define PARAM_TOKEN_INDEX(token) PARAM_INDEX(AP_Param::get_persistent_key(token.key), token.idx, token.group_element)
 
-#define AP_OSD_NUM_SYMBOLS 91
+#define AP_OSD_NUM_SYMBOLS 107
+#define OSD_MAX_INSTANCES 2
+
+#if AP_OSD_LINK_STATS_EXTENSIONS_ENABLED
+// For the moment, these extra panels only work with CRSF protocol based RC systems
+#define AP_OSD_EXTENDED_LNK_STATS 1
+#define AP_OSD_WARN_RSSI_DEFAULT -100   // Default value for OSD RSSI panel warning, in dbm
+#else
+#define AP_OSD_EXTENDED_LNK_STATS 0
+#define AP_OSD_WARN_RSSI_DEFAULT 30     // Default value for OSD RSSI panel warning, in %
+#endif
+
 /*
   class to hold one setting
  */
@@ -101,7 +100,7 @@ public:
 
 protected:
     bool check_option(uint32_t option);
-#ifdef HAL_WITH_MSP_DISPLAYPORT
+#if HAL_WITH_MSP_DISPLAYPORT
     virtual uint8_t get_txt_resolution() const {
         return 0;
     }
@@ -148,7 +147,7 @@ public:
     static const struct AP_Param::GroupInfo var_info[];
     static const struct AP_Param::GroupInfo var_info2[];
 
-#ifdef HAL_WITH_MSP_DISPLAYPORT
+#if HAL_WITH_MSP_DISPLAYPORT
     uint8_t get_txt_resolution() const override {
         return txt_resolution;
     }
@@ -169,12 +168,20 @@ private:
     //typical fpv camera has 80deg vertical field of view, 16 row of chars
     static constexpr float ah_pitch_rad_to_char = 16.0f/(DEG_TO_RAD * 80);
 
+    enum class VoltageType {
+        VOLTAGE,
+        RESTING_VOLTAGE,
+        AVG_CELL,
+        RESTING_CELL,
+    };
+
     AP_OSD_Setting altitude{true, 23, 8};
     AP_OSD_Setting bat_volt{true, 24, 1};
     AP_OSD_Setting rssi{true, 1, 1};
     AP_OSD_Setting link_quality{false,1,1};
     AP_OSD_Setting restvolt{false, 24, 2};
     AP_OSD_Setting avgcellvolt{false, 24, 3};
+    AP_OSD_Setting avgcellrestvolt{false, 24, 4};
     AP_OSD_Setting current{true, 25, 2};
     AP_OSD_Setting batused{true, 23, 3};
     AP_OSD_Setting sats{true, 1, 3};
@@ -191,6 +198,9 @@ private:
     AP_OSD_Setting aspd1;
     AP_OSD_Setting aspd2;
     AP_OSD_Setting vspeed{true, 24, 9};
+#if AP_RPM_ENABLED
+    AP_OSD_Setting rrpm{false, 2, 2};
+#endif
 #if HAL_WITH_ESC_TELEM
     AP_OSD_Setting esc_temp {false, 24, 13};
     AP_OSD_Setting esc_rpm{false, 22, 12};
@@ -227,6 +237,15 @@ private:
 #endif
     AP_OSD_Setting sidebars{false, 4, 5};
 
+#if AP_OSD_EXTENDED_LNK_STATS
+    // Extended link stats data panels
+    AP_OSD_Setting rc_tx_power{false, 25, 12};
+    AP_OSD_Setting rc_rssi_dbm{false, 6, 2};
+    AP_OSD_Setting rc_snr{false, 23, 13};
+    AP_OSD_Setting rc_active_antenna{false, 27, 13};
+    AP_OSD_Setting rc_lq{false, 18, 2};
+#endif
+
     // MSP OSD only
     AP_OSD_Setting crosshair;
     AP_OSD_Setting home_dist{true, 1, 1};
@@ -236,15 +255,20 @@ private:
     AP_OSD_Setting batt_bar{true, 1, 1};
     AP_OSD_Setting arming{true, 1, 1};
 
-#ifdef HAL_WITH_MSP_DISPLAYPORT
+#if HAL_WITH_MSP_DISPLAYPORT
     // Per screen HD resolution options (currently supported only by DisplayPort)
     AP_Int8 txt_resolution;
     AP_Int8 font_index;
 #endif
+#if HAL_WITH_ESC_TELEM
+    AP_Int8 esc_index;
+#endif
 
     void draw_altitude(uint8_t x, uint8_t y);
+    void draw_bat_volt(uint8_t instance,VoltageType  type,uint8_t x, uint8_t y);
     void draw_bat_volt(uint8_t x, uint8_t y);
     void draw_avgcellvolt(uint8_t x, uint8_t y);
+    void draw_avgcellrestvolt(uint8_t x, uint8_t y);
     void draw_restvolt(uint8_t x, uint8_t y);
     void draw_rssi(uint8_t x, uint8_t y);
     void draw_link_quality(uint8_t x, uint8_t y);
@@ -260,6 +284,9 @@ private:
     void draw_home(uint8_t x, uint8_t y);
     void draw_throttle(uint8_t x, uint8_t y);
     void draw_heading(uint8_t x, uint8_t y);
+#if AP_RPM_ENABLED
+    void draw_rrpm(uint8_t x, uint8_t y);
+#endif
 #ifdef HAL_OSD_SIDEBAR_ENABLE
     void draw_sidebars(uint8_t x, uint8_t y);
 #endif
@@ -275,6 +302,7 @@ private:
     //helper functions
     void draw_speed(uint8_t x, uint8_t y, float angle_rad, float magnitude);
     void draw_distance(uint8_t x, uint8_t y, float distance);
+    char get_arrow_font_index (int32_t angle_cd);
 #if HAL_WITH_ESC_TELEM
     void draw_esc_temp(uint8_t x, uint8_t y);
     void draw_esc_rpm(uint8_t x, uint8_t y);
@@ -307,7 +335,19 @@ private:
 #if AP_FENCE_ENABLED
     void draw_fence(uint8_t x, uint8_t y);
 #endif
+#if AP_RANGEFINDER_ENABLED
     void draw_rngf(uint8_t x, uint8_t y);
+#endif
+
+#if AP_OSD_EXTENDED_LNK_STATS
+    // Extended link stats data panels
+    bool is_btfl_fonts();    
+    void draw_rc_tx_power(uint8_t x, uint8_t y);
+    void draw_rc_rssi_dbm(uint8_t x, uint8_t y);
+    void draw_rc_snr(uint8_t x, uint8_t y);
+    void draw_rc_active_antenna(uint8_t x, uint8_t y);    
+    void draw_rc_lq(uint8_t x, uint8_t y);
+#endif
 
     struct {
         bool load_attempted;
@@ -324,6 +364,18 @@ class AP_OSD_ParamSetting
 {
 public:
 
+    enum class Type : uint8_t {
+        NONE = 0,
+        SERIAL_PROTOCOL    =  1,
+        SERVO_FUNCTION     =  2,
+        AUX_FUNCTION       =  3,
+        FLIGHT_MODE        =  4,
+        FAILSAFE_ACTION    =  5,
+        FAILSAFE_ACTION_1  =  6,
+        FAILSAFE_ACTION_2  =  7,
+        NUM_TYPES          =  8,
+    };
+
     AP_Int8 enabled;
     AP_Int8 xpos;
     AP_Int8 ypos;
@@ -336,7 +388,7 @@ public:
     AP_Float _param_min;
     AP_Float _param_max;
     AP_Float _param_incr;
-    AP_Int8 _type;
+    AP_Enum<Type> _type;
 
     // parameter number
     uint8_t _param_number;
@@ -352,11 +404,12 @@ public:
         uint8_t values_max;
         const char** values;
     };
+
     // compact structure used to hold default values for static initialization
     struct Initializer {
         uint8_t index;
         AP_Param::ParamToken token;
-        int8_t type;
+        Type type;
     };
 
     static const ParamMetadata _param_metadata[];
@@ -448,8 +501,10 @@ private:
     void modify_parameter(uint8_t number, Event ev);
     void modify_configured_parameter(uint8_t number, Event ev);
 
+#if AP_RC_CHANNEL_ENABLED
     Event map_rc_input_to_event() const;
-    RC_Channel::AuxSwitchPos get_channel_pos(uint8_t rcmapchan) const;
+    RC_Channel::AuxSwitchPos get_channel_pos(const class RC_Channel &chan) const;
+#endif
 
     uint8_t _selected_param = 1;
     MenuState _menu_state = MenuState::PARAM_SELECT;
@@ -500,6 +555,9 @@ public:
         OSD_TXONLY=4,
         OSD_MSP_DISPLAYPORT=5
     };
+
+    bool init_backend(const osd_types type, const uint8_t instance);
+
     enum switch_method {
         TOGGLE=0,
         PWM_RANGE=1,
@@ -507,6 +565,7 @@ public:
     };
 
     AP_Int8 osd_type;
+    AP_Int8 osd_type2; // additional backend active in parallel
     AP_Int8 font_num;
     AP_Int32 options;
 
@@ -524,6 +583,7 @@ public:
     AP_Float max_battery_voltage;
     AP_Int8 cell_count;
     AP_Float warn_restvolt;
+    AP_Float warn_avgcellrestvolt;
     AP_Float warn_batvolt;
     AP_Float warn_bat2volt;
     AP_Int8 msgtime_s;
@@ -532,12 +592,27 @@ public:
     AP_Int8 failsafe_scr;
     AP_Int32 button_delay_ms;
 
+#if AP_OSD_EXTENDED_LNK_STATS
+    AP_Int8 warn_lq;
+    AP_Int8 warn_snr;
+#endif
+
+#if HAL_OSD_SIDEBAR_ENABLE
+    AP_Int8 sidebar_h_offset;
+    AP_Int8 sidebar_v_ext;
+#endif
+
     enum {
         OPTION_DECIMAL_PACK = 1U<<0,
         OPTION_INVERTED_WIND = 1U<<1,
         OPTION_INVERTED_AH_ROLL = 1U<<2,
         OPTION_IMPERIAL_MILES = 1U<<3,
         OPTION_DISABLE_CROSSHAIR = 1U<<4,
+        OPTION_BF_ARROWS = 1U<<5,
+        OPTION_AVIATION_AH = 1U<<6,
+#if AP_OSD_EXTENDED_LNK_STATS
+        OPTION_RF_MODE_ALONG_WITH_LQ = 1U<<7,
+#endif
     };
 
     enum {
@@ -641,7 +716,8 @@ private:
 
     StatsInfo _stats;
 #endif
-    AP_OSD_Backend *backend;
+    AP_OSD_Backend *_backends[OSD_MAX_INSTANCES];
+    uint8_t _backend_count;
 
     static AP_OSD *_singleton;
     // multi-thread access support

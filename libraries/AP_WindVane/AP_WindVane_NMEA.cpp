@@ -13,10 +13,13 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "AP_WindVane_config.h"
+
+#if AP_WINDVANE_NMEA_ENABLED
+
 #include <AP_HAL/AP_HAL.h>
 #include "AP_WindVane_NMEA.h"
 #include <AP_SerialManager/AP_SerialManager.h>
-#include <GCS_MAVLink/GCS.h>
 
 /*
     NMEA wind vane library, tested with Calypso Wired sensor,
@@ -136,8 +139,8 @@ bool AP_WindVane_NMEA::decode_latest_term()
         // we accept any two characters here.
         if (_term[0] < 'A' || _term[0] > 'Z' ||
             _term[1] < 'A' || _term[1] > 'Z') {
-            // unknown ID (we are actually expecting II)
-             return false;
+             // unknown ID (we are actually expecting II)
+            return false;
         }
         const char *term_type = &_term[2];
         if (strcmp(term_type, "MWV") == 0) {
@@ -198,3 +201,5 @@ bool AP_WindVane_NMEA::decode_latest_term()
     }
     return false;
 }
+
+#endif  // AP_WINDVANE_NMEA_ENABLED

@@ -2,6 +2,7 @@
    example for getting cached aux function value
 --]]
 
+
 local RATE_HZ = 10
 
 local MAV_SEVERITY_ERROR = 3
@@ -9,7 +10,6 @@ local MAV_SEVERITY_INFO = 6
 
 local AUX_FUNCTION_NUM = 302
 
-local last_func_val = nil
 local last_aux_pos = nil
 
 function update()

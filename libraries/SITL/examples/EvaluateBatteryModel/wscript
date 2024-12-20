@@ -10,8 +10,6 @@ def build(bld):
     source.append('../../../../libraries/SITL/SIM_Battery.cpp')
     source.append('../../../../libraries/SITL/SIM_Frame.cpp')
 
-    bld.env.DEFINES.append("USE_PICOJSON=1")
-
     bld.ap_program(
         use='ap',
         program_groups=['examples'],

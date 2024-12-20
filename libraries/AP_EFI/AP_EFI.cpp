@@ -22,10 +22,13 @@
 #include "AP_EFI_NWPMU.h"
 #include "AP_EFI_DroneCAN.h"
 #include "AP_EFI_Currawong_ECU.h"
+#include "AP_EFI_Serial_Hirth.h"
 #include "AP_EFI_Scripting.h"
+#include "AP_EFI_MAV.h"
 
 #include <AP_Logger/AP_Logger.h>
 #include <GCS_MAVLink/GCS.h>
+#include <AP_Math/AP_Math.h>
 
 #if HAL_MAX_CAN_PROTOCOL_DRIVERS
 #include <AP_CANManager/AP_CANManager.h>
@@ -38,7 +41,7 @@ const AP_Param::GroupInfo AP_EFI::var_info[] = {
     // @Param: _TYPE
     // @DisplayName: EFI communication type
     // @Description: What method of communication is used for EFI #1
-    // @Values: 0:None,1:Serial-MS,2:NWPMU,3:Serial-Lutan,5:DroneCAN,6:Currawong-ECU,7:Scripting
+    // @Values: 0:None,1:Serial-MS,2:NWPMU,3:Serial-Lutan,5:DroneCAN,6:Currawong-ECU,7:Scripting,8:Hirth,9:MAVLink
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO_FLAGS("_TYPE", 1, AP_EFI, type, 0, AP_PARAM_FLAG_ENABLE),
@@ -65,6 +68,12 @@ const AP_Param::GroupInfo AP_EFI::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("_FUEL_DENS", 4, AP_EFI, ecu_fuel_density, 0),
 
+#if AP_EFI_THROTTLE_LINEARISATION_ENABLED   
+    // @Group: _THRLIN
+    // @Path: AP_EFI_ThrottleLinearisation.cpp
+    AP_SUBGROUPINFO(throttle_linearisation, "_THRLIN", 5, AP_EFI, AP_EFI_ThrLin),
+#endif
+
     AP_GROUPEND
 };
 
@@ -87,32 +96,46 @@ void AP_EFI::init(void)
     switch ((Type)type.get()) {
     case Type::NONE:
         break;
+#if AP_EFI_SERIAL_MS_ENABLED
     case Type::MegaSquirt:
-        backend = new AP_EFI_Serial_MS(*this);
+        backend = NEW_NOTHROW AP_EFI_Serial_MS(*this);
         break;
+#endif
+#if AP_EFI_SERIAL_LUTAN_ENABLED
     case Type::Lutan:
-        backend = new AP_EFI_Serial_Lutan(*this);
+        backend = NEW_NOTHROW AP_EFI_Serial_Lutan(*this);
         break;
+#endif
+#if AP_EFI_NWPWU_ENABLED
     case Type::NWPMU:
-#if HAL_EFI_NWPWU_ENABLED
-        backend = new AP_EFI_NWPMU(*this);
-#endif
+        backend = NEW_NOTHROW AP_EFI_NWPMU(*this);
         break;
+#endif
+#if AP_EFI_DRONECAN_ENABLED
     case Type::DroneCAN:
-#if HAL_EFI_DRONECAN_ENABLED
-        backend = new AP_EFI_DroneCAN(*this);
-#endif
+        backend = NEW_NOTHROW AP_EFI_DroneCAN(*this);
         break;
+#endif
+#if AP_EFI_CURRAWONG_ECU_ENABLED
     case Type::CurrawongECU:
-#if HAL_EFI_CURRAWONG_ECU_ENABLED
-        backend = new AP_EFI_Currawong_ECU(*this);
-#endif
+        backend = NEW_NOTHROW AP_EFI_Currawong_ECU(*this);
         break;
-    case Type::SCRIPTING:
+#endif
 #if AP_EFI_SCRIPTING_ENABLED
-        backend = new AP_EFI_Scripting(*this);
-#endif
+    case Type::SCRIPTING:
+        backend = NEW_NOTHROW AP_EFI_Scripting(*this);
         break;
+#endif        
+#if AP_EFI_SERIAL_HIRTH_ENABLED        
+    case Type::Hirth:
+        backend = NEW_NOTHROW AP_EFI_Serial_Hirth(*this);
+        break;
+#endif
+#if AP_EFI_MAV_ENABLED
+    case Type::MAV:
+            backend = NEW_NOTHROW AP_EFI_MAV(*this);
+            break;
+#endif
     default:
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Unknown EFI type");
         break;
@@ -222,19 +245,23 @@ void AP_EFI::log_status(void)
 // @Field: CHT: Cylinder head temperature
 // @Field: EGT: Exhaust gas temperature
 // @Field: Lambda: Estimated lambda coefficient (dimensionless ratio)
+// @Field: CHT2: Cylinder2 head temperature
+// @Field: EGT2: Cylinder2 Exhaust gas temperature
 // @Field: IDX: Index of the publishing ECU
     AP::logger().WriteStreaming("ECYL",
-                                "TimeUS,Inst,IgnT,InjT,CHT,EGT,Lambda,IDX",
-                                "s#dsOO--",
-                                "F-0C0000",
-                                "QBfffffB",
+                                "TimeUS,Inst,IgnT,InjT,CHT,EGT,Lambda,CHT2,EGT2,IDX",
+                                "s#dsOO-OO-",
+                                "F-0C000000",
+                                "QBffffffff",
                                 AP_HAL::micros64(),
                                 0,
                                 state.cylinder_status.ignition_timing_deg,
                                 state.cylinder_status.injection_time_ms,
-                                state.cylinder_status.cylinder_head_temperature,
-                                state.cylinder_status.exhaust_gas_temperature,
+                                KELVIN_TO_C(state.cylinder_status.cylinder_head_temperature),
+                                KELVIN_TO_C(state.cylinder_status.exhaust_gas_temperature),
                                 state.cylinder_status.lambda_coefficient,
+                                KELVIN_TO_C(state.cylinder_status.cylinder_head_temperature2),
+                                KELVIN_TO_C(state.cylinder_status.exhaust_gas_temperature2),
                                 state.ecu_index);
 }
 #endif // LOGGING_ENABLED
@@ -247,6 +274,26 @@ void AP_EFI::send_mavlink_status(mavlink_channel_t chan)
     if (!backend) {
         return;
     }
+
+    float ignition_voltage;
+    if (isnan(state.ignition_voltage) ||
+        is_equal(state.ignition_voltage, -1.0f)) {
+        // zero means "unknown" in mavlink, 0.0001 means 0 volts
+        ignition_voltage = 0;
+    } else if (is_zero(state.ignition_voltage)) {
+        // zero means "unknown" in mavlink, 0.0001 means 0 volts
+        ignition_voltage = 0.0001f;
+    } else {
+        ignition_voltage = state.ignition_voltage;
+    };
+
+    // If fuel pressure is supported, but is exactly zero, shift it to 0.0001
+    // to indicate that it is supported.
+    float fuel_pressure = state.fuel_pressure;
+    if (is_zero(fuel_pressure) && state.fuel_pressure_status != Fuel_Pressure_Status::NOT_SUPPORTED) {
+        fuel_pressure = 0.0001;
+    }
+
     mavlink_msg_efi_status_send(
         chan,
         AP_EFI::is_healthy(),
@@ -266,7 +313,8 @@ void AP_EFI::send_mavlink_status(mavlink_channel_t chan)
         KELVIN_TO_C(state.cylinder_status.exhaust_gas_temperature),
         state.throttle_out,
         state.pt_compensation,
-        state.ignition_voltage
+        ignition_voltage,
+        fuel_pressure
         );
 }
 
@@ -275,6 +323,12 @@ void AP_EFI::get_state(EFI_State &_state)
 {
     WITH_SEMAPHORE(sem);
     _state = state;
+}
+
+void AP_EFI::handle_EFI_message(const mavlink_message_t &msg) {
+    if (backend != nullptr) {
+        backend->handle_EFI_message(msg);
+    }
 }
 
 namespace AP {

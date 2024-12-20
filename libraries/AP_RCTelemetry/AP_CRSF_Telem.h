@@ -14,20 +14,11 @@
 */
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
-#include <AP_Frsky_Telem/AP_Frsky_config.h>
-#include <AP_OSD/AP_OSD.h>
-
-#ifndef HAL_CRSF_TELEM_ENABLED
-#define HAL_CRSF_TELEM_ENABLED AP_FRSKY_SPORT_PASSTHROUGH_ENABLED
-#endif
-
-#ifndef HAL_CRSF_TELEM_TEXT_SELECTION_ENABLED
-#define HAL_CRSF_TELEM_TEXT_SELECTION_ENABLED OSD_ENABLED && OSD_PARAM_ENABLED && HAL_CRSF_TELEM_ENABLED && BOARD_FLASH_SIZE > 1024
-#endif
+#include "AP_RCTelemetry_config.h"
 
 #if HAL_CRSF_TELEM_ENABLED
 
+#include <AP_OSD/AP_OSD.h>
 #include <AP_RCProtocol/AP_RCProtocol_CRSF.h>
 #include "AP_RCTelemetry.h"
 #include <AP_HAL/utility/sparse-endian.h>
@@ -71,6 +62,15 @@ public:
         uint16_t current; // ( mA * 100 )
         uint8_t capacity[3]; // ( mAh )
         uint8_t remaining; // ( percent )
+    };
+
+    struct PACKED BaroVarioFrame {
+        uint16_t altitude_packed; // Altitude above start (calibration) point.
+        int8_t vertical_speed_packed; // vertical speed.
+    };
+
+    struct PACKED VarioFrame {
+        int16_t v_speed; // vertical speed cm/s
     };
 
     struct PACKED VTXFrame {
@@ -210,6 +210,8 @@ public:
     union PACKED BroadcastFrame {
         GPSFrame gps;
         HeartbeatFrame heartbeat;
+        BaroVarioFrame baro_vario;
+        VarioFrame vario;
         BatteryFrame battery;
         VTXFrame vtx;
         AttitudeFrame attitude;
@@ -241,16 +243,18 @@ public:
 
     // Process a frame from the CRSF protocol decoder
     static bool process_frame(AP_RCProtocol_CRSF::FrameType frame_type, void* data);
-    // process any changed settings and schedule for transmission
-    void update();
     // get next telemetry data for external consumers of SPort data
     static bool get_telem_data(AP_RCProtocol_CRSF::Frame* frame, bool is_tx_active);
+    // start bind request
+    void start_bind() { _bind_request_pending = true; }
 
 private:
 
     enum SensorType {
         HEARTBEAT,
         PARAMETERS,
+        BARO_VARIO,
+        VARIO,
         ATTITUDE,
         VTX_PARAMETERS,
         BATTERY,
@@ -274,12 +278,17 @@ private:
     void calc_parameter_ping();
     void calc_heartbeat();
     void calc_battery();
+    uint16_t get_altitude_packed();
+    int8_t get_vertical_speed_packed();
+    void calc_baro_vario();
+    void calc_vario();
     void calc_gps();
     void calc_attitude();
     void calc_flight_mode();
     void calc_device_info();
     void calc_device_ping(uint8_t destination);
     void calc_command_response();
+    void calc_bind();
     void calc_parameter();
 #if HAL_CRSF_TELEM_TEXT_SELECTION_ENABLED
     void calc_text_selection( AP_OSD_ParamSetting* param, uint8_t chunk);
@@ -344,6 +353,7 @@ private:
         bool use_rf_mode;
         AP_RCProtocol_CRSF::ProtocolType protocol;
         bool pending = true;
+        uint32_t last_request_info_ms;
     } _crsf_version;
 
     struct {
@@ -357,6 +367,8 @@ private:
         bool valid;
         uint8_t port_id;
     } _baud_rate_request;
+
+    bool _bind_request_pending;
 
     // vtx state
     bool _vtx_freq_update;  // update using the frequency method or not

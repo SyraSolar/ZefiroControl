@@ -29,12 +29,13 @@
 #include <AP_Math/crc.h>
 #include <GCS_MAVLink/GCS.h>
 #include <AP_Logger/AP_Logger.h>
+#include <AP_SerialManager/AP_SerialManager.h>
 
 const AP_Param::GroupInfo AP_RunCam::var_info[] = {
     // @Param: TYPE
     // @DisplayName: RunCam device type
-    // @Description: RunCam deviee type used to determine OSD menu structure and shutter options.
-    // @Values: 0:Disabled, 1:RunCam Split Micro/RunCam with UART, 2:RunCam Split, 3:RunCam Split4 4k, 4:RunCam Hybrid/RunCam Thumb Pro
+    // @Description: RunCam device type used to determine OSD menu structure and shutter options.
+    // @Values: 0:Disabled, 1:RunCam Split Micro/RunCam with UART, 2:RunCam Split, 3:RunCam Split4 4k, 4:RunCam Hybrid/RunCam Thumb Pro, 5:Runcam 2 4k
     AP_GROUPINFO_FLAGS("TYPE", 1, AP_RunCam, _cam_type, int(DeviceType::Disabled), AP_PARAM_FLAG_ENABLE),
 
     // @Param: FEATURES
@@ -64,7 +65,7 @@ const AP_Param::GroupInfo AP_RunCam::var_info[] = {
 
     // @Param: CONTROL
     // @DisplayName: RunCam control option
-    // @Description: Specifies the allowed actions required to enter the OSD menu
+    // @Description: Specifies the allowed actions required to enter the OSD menu and other option like autorecording
     // @Bitmask: 0:Stick yaw right,1:Stick roll right,2:3-position switch,3:2-position switch,4:Autorecording enabled
     // @User: Advanced
     AP_GROUPINFO("CONTROL", 6, AP_RunCam, _cam_control_option, uint8_t(ControlOption::STICK_ROLL_RIGHT) | uint8_t(ControlOption::TWO_POS_SWITCH)),
@@ -114,6 +115,7 @@ AP_RunCam::Menu AP_RunCam::_menus[RUNCAM_MAX_DEVICE_TYPES] = {
     { 0, { 0 }}, // Split
     { 6, { 4, 10, 3, 3, 7 }}, // Split4 4K
     { 1, { 0 }}, // Hybrid, simple mode switch
+	{ 6, { 3, 10, 2, 2, 8 }}, // Runcam 2 4K
 };
 
 AP_RunCam::AP_RunCam()
@@ -153,8 +155,8 @@ void AP_RunCam::init()
         return;
     }
 
-    // Split requires two mode presses to get into the menu
-    if (_cam_type.get() == int8_t(DeviceType::Split)) {
+    // Split and Runcam 2 4k requires two mode presses to get into the menu
+    if (_cam_type.get() == int8_t(DeviceType::Split) || _cam_type.get() == int8_t(DeviceType::Run24k)) {
         _menu_enter_level = -1;
         _in_menu = -1;
     }
@@ -262,7 +264,7 @@ void AP_RunCam::update_osd()
 {
     bool use_armed_state_machine = hal.util->get_soft_armed();
 #if OSD_ENABLED
-    // prevent runcam stick gestures interferring with osd stick gestures
+    // prevent runcam stick gestures interfering with osd stick gestures
     if (!use_armed_state_machine) {
         const AP_OSD* osd = AP::osd();
         if (osd != nullptr) {
@@ -449,10 +451,10 @@ void AP_RunCam::handle_in_menu(Event ev)
 // map rc input to an event
 AP_RunCam::Event AP_RunCam::map_rc_input_to_event() const
 {
-    const RC_Channel::AuxSwitchPos throttle = rc().get_channel_pos(AP::rcmap()->throttle());
-    const RC_Channel::AuxSwitchPos yaw = rc().get_channel_pos(AP::rcmap()->yaw());
-    const RC_Channel::AuxSwitchPos roll = rc().get_channel_pos(AP::rcmap()->roll());
-    const RC_Channel::AuxSwitchPos pitch = rc().get_channel_pos(AP::rcmap()->pitch());
+    const RC_Channel::AuxSwitchPos throttle = rc().get_throttle_channel().get_aux_switch_pos();
+    const RC_Channel::AuxSwitchPos yaw = rc().get_yaw_channel().get_aux_switch_pos();
+    const RC_Channel::AuxSwitchPos roll = rc().get_roll_channel().get_aux_switch_pos();
+    const RC_Channel::AuxSwitchPos pitch = rc().get_pitch_channel().get_aux_switch_pos();
 
     Event result = Event::NONE;
 
@@ -549,12 +551,12 @@ void AP_RunCam::handle_2_key_simulation_process(Event ev)
 
     case Event::IN_MENU_ENTER:
         // in a sub-menu and save-and-exit was selected
-        if (_in_menu > 1 && get_top_menu_length() > 0 && _sub_menu_pos == (get_sub_menu_length(_top_menu_pos) - 1)) {
+        if (_in_menu > 1 && get_top_menu_length() > 0 && _sub_menu_pos == (get_sub_menu_length(_top_menu_pos) - 1) && DeviceType(_cam_type.get()) != DeviceType::Run24k) {
             simulate_camera_button(ControlOperation::RCDEVICE_PROTOCOL_SIMULATE_WIFI_BTN, _button_delay_ms);
             _sub_menu_pos = 0;
             _in_menu--;
         // in the top-menu and save-and-exit was selected
-        } else if (_in_menu == 1 && get_top_menu_length() > 0 && _top_menu_pos == (get_top_menu_length() - 1)) {
+        } else if (_in_menu == 1 && get_top_menu_length() > 0 && _top_menu_pos == (get_top_menu_length() - 1) && DeviceType(_cam_type.get()) != DeviceType::Run24k) {
             simulate_camera_button(ControlOperation::RCDEVICE_PROTOCOL_SIMULATE_WIFI_BTN, _mode_delay_ms);
             _in_menu--;
             _state = State::EXITING_MENU;
@@ -578,7 +580,7 @@ void AP_RunCam::handle_2_key_simulation_process(Event ev)
 
     case Event::IN_MENU_EXIT:
         // if we are in a sub-menu this will move us out, if we are in the root menu this will
-        // exit causing the state machine to get out of sync. the OSD menu hierachy is consistently
+        // exit causing the state machine to get out of sync. the OSD menu hierarchy is consistently
         // 2 deep so we can count and be reasonably confident of where we are.
         // the only exception is if someone hits save and exit on the root menu - then we are lost.
         if (_in_menu > 0) {
@@ -710,7 +712,7 @@ void AP_RunCam::handle_5_key_simulation_response(const Request& request)
 
 // command to start recording
 AP_RunCam::ControlOperation AP_RunCam::start_recording_command() const {
-    if (DeviceType(_cam_type.get()) == DeviceType::Split4k || DeviceType(_cam_type.get()) == DeviceType::Hybrid) {
+    if (DeviceType(_cam_type.get()) == DeviceType::Split4k || DeviceType(_cam_type.get()) == DeviceType::Hybrid || DeviceType(_cam_type.get()) == DeviceType::Run24k) {
         return ControlOperation::RCDEVICE_PROTOCOL_SIMULATE_POWER_BTN;
     } else {
         return ControlOperation::RCDEVICE_PROTOCOL_CHANGE_START_RECORDING;
@@ -719,7 +721,7 @@ AP_RunCam::ControlOperation AP_RunCam::start_recording_command() const {
 
 // command to stop recording
 AP_RunCam::ControlOperation AP_RunCam::stop_recording_command() const {
-    if (DeviceType(_cam_type.get()) == DeviceType::Split4k || DeviceType(_cam_type.get()) == DeviceType::Hybrid) {
+    if (DeviceType(_cam_type.get()) == DeviceType::Split4k || DeviceType(_cam_type.get()) == DeviceType::Hybrid || DeviceType(_cam_type.get()) == DeviceType::Run24k) {
         return ControlOperation::RCDEVICE_PROTOCOL_SIMULATE_POWER_BTN;
     } else {
         return ControlOperation::RCDEVICE_PROTOCOL_CHANGE_STOP_RECORDING;
@@ -790,7 +792,6 @@ void AP_RunCam::start_uart()
     uart->configure_parity(0);
     uart->set_stop_bits(1);
     uart->set_flow_control(AP_HAL::UARTDriver::FLOW_CONTROL_DISABLE);
-    uart->set_blocking_writes(false);   // updates run in the main thread
     uart->set_options(uart->get_options() | AP_HAL::UARTDriver::OPTION_NODMA_TX | AP_HAL::UARTDriver::OPTION_NODMA_RX);
     uart->begin(115200, 10, 10);
     uart->discard_input();
@@ -957,11 +958,11 @@ void AP_RunCam::parse_device_info(const Request& request)
     }
     if (_features > 0) {
         _state = State::INITIALIZED;
-        gcs().send_text(MAV_SEVERITY_INFO, "RunCam initialized, features 0x%04X, %d-key OSD\n", _features.get(),
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "RunCam initialized, features 0x%04X, %d-key OSD\n", _features.get(),
             has_5_key_OSD() ? 5 : has_2_key_OSD() ? 2 : 0);
     } else {
         // nothing as as nothing does
-        gcs().send_text(MAV_SEVERITY_WARNING, "RunCam device not found\n");
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "RunCam device not found\n");
     }
     debug("RunCam: initialized state: video: %d, osd: %d, cam: %d\n", int(_video_recording), int(_osd_option), int(_cam_control_option));
 }
@@ -1023,13 +1024,13 @@ bool AP_RunCam::request_pending(uint32_t now)
 AP_RunCam::Request::Request(AP_RunCam* device, Command commandID, uint8_t param,
     uint32_t timeout, uint16_t maxRetryTimes, parse_func_t parserFunc)
     : _recv_buf(device->_recv_buf),
-    _command(commandID),
-    _max_retry_times(maxRetryTimes),
-    _timeout_ms(timeout),
     _device(device),
+    _command(commandID),
     _param(param),
-    _parser_func(parserFunc),
     _recv_response_length(0),
+    _timeout_ms(timeout),
+    _max_retry_times(maxRetryTimes),
+    _parser_func(parserFunc),
     _result(RequestStatus::PENDING)
 {
     _request_timestamp_ms = AP_HAL::millis();

@@ -17,6 +17,8 @@
  */
 #include "AP_Compass_AK09916.h"
 
+#if AP_COMPASS_AK09916_ENABLED
+
 #include <assert.h>
 #include <AP_HAL/AP_HAL.h>
 #include <utility>
@@ -56,13 +58,6 @@ extern const AP_HAL::HAL &hal;
 
 extern const AP_HAL::HAL &hal;
 
-struct PACKED sample_regs {
-    uint8_t st1;
-    int16_t val[3];
-    uint8_t tmps;
-    uint8_t st2;
-};
-
 AP_Compass_AK09916::AP_Compass_AK09916(AP_AK09916_BusDriver *bus,
                                         bool force_external,
                                         enum Rotation rotation)
@@ -84,12 +79,12 @@ AP_Compass_Backend *AP_Compass_AK09916::probe(AP_HAL::OwnPtr<AP_HAL::I2CDevice> 
     if (!dev) {
         return nullptr;
     }
-    AP_AK09916_BusDriver *bus = new AP_AK09916_BusDriver_HALDevice(std::move(dev));
+    AP_AK09916_BusDriver *bus = NEW_NOTHROW AP_AK09916_BusDriver_HALDevice(std::move(dev));
     if (!bus) {
         return nullptr;
     }
 
-    AP_Compass_AK09916 *sensor = new AP_Compass_AK09916(bus, force_external, rotation);
+    AP_Compass_AK09916 *sensor = NEW_NOTHROW AP_Compass_AK09916(bus, force_external, rotation);
     if (!sensor || !sensor->init()) {
         delete sensor;
         return nullptr;
@@ -98,6 +93,7 @@ AP_Compass_Backend *AP_Compass_AK09916::probe(AP_HAL::OwnPtr<AP_HAL::I2CDevice> 
     return sensor;
 }
 
+#if AP_COMPASS_ICM20948_ENABLED
 AP_Compass_Backend *AP_Compass_AK09916::probe_ICM20948(AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
                                                      AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev_icm,
                                                      bool force_external,
@@ -183,12 +179,12 @@ AP_Compass_Backend *AP_Compass_AK09916::probe_ICM20948_SPI(uint8_t inv2_instance
     AP_InertialSensor &ins = AP::ins();
 
     AP_AK09916_BusDriver *bus =
-        new AP_AK09916_BusDriver_Auxiliary(ins, HAL_INS_INV2_SPI, inv2_instance, HAL_COMPASS_AK09916_I2C_ADDR);
+        NEW_NOTHROW AP_AK09916_BusDriver_Auxiliary(ins, HAL_INS_INV2_SPI, inv2_instance, HAL_COMPASS_AK09916_I2C_ADDR);
     if (!bus) {
         return nullptr;
     }
 
-    AP_Compass_AK09916 *sensor = new AP_Compass_AK09916(bus, false, rotation);
+    AP_Compass_AK09916 *sensor = NEW_NOTHROW AP_Compass_AK09916(bus, false, rotation);
     if (!sensor || !sensor->init()) {
         delete sensor;
         return nullptr;
@@ -206,12 +202,12 @@ AP_Compass_Backend *AP_Compass_AK09916::probe_ICM20948_I2C(uint8_t inv2_instance
     AP_InertialSensor &ins = AP::ins();
 
     AP_AK09916_BusDriver *bus =
-        new AP_AK09916_BusDriver_Auxiliary(ins, HAL_INS_INV2_I2C, inv2_instance, HAL_COMPASS_AK09916_I2C_ADDR);
+        NEW_NOTHROW AP_AK09916_BusDriver_Auxiliary(ins, HAL_INS_INV2_I2C, inv2_instance, HAL_COMPASS_AK09916_I2C_ADDR);
     if (!bus) {
         return nullptr;
     }
 
-    AP_Compass_AK09916 *sensor = new AP_Compass_AK09916(bus, false, rotation);
+    AP_Compass_AK09916 *sensor = NEW_NOTHROW AP_Compass_AK09916(bus, false, rotation);
     if (!sensor || !sensor->init()) {
         delete sensor;
         return nullptr;
@@ -219,6 +215,7 @@ AP_Compass_Backend *AP_Compass_AK09916::probe_ICM20948_I2C(uint8_t inv2_instance
 
     return sensor;
 }
+#endif  // AP_COMPASS_ICM20948_ENABLED
 
 bool AP_Compass_AK09916::init()
 {
@@ -307,8 +304,15 @@ void AP_Compass_AK09916::_update()
     }
 
     if (!(regs.st1 & 0x01)) {
+        no_data++;
+        if (no_data == 5) {
+            _reset();
+            _setup_mode();
+            no_data = 0;
+        }
         goto check_registers;
     }
+    no_data = 0;
 
     /* Check for overflow. See AK09916's datasheet*/
     if ((regs.st2 & 0x08)) {
@@ -466,7 +470,7 @@ bool AP_AK09916_BusDriver_Auxiliary::configure()
 
 bool AP_AK09916_BusDriver_Auxiliary::start_measurements()
 {
-    if (_bus->register_periodic_read(_slave, REG_ST1, sizeof(sample_regs)) < 0) {
+    if (_bus->register_periodic_read(_slave, REG_ST1, sizeof(AP_Compass_AK09916::sample_regs)) < 0) {
         return false;
     }
 
@@ -491,3 +495,5 @@ uint32_t AP_AK09916_BusDriver_Auxiliary::get_bus_id(void) const
 {
     return _bus->get_bus_id();
 }
+
+#endif  // AP_COMPASS_AK09916_ENABLED

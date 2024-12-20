@@ -20,6 +20,7 @@
 -- soon as the vehicle arms, so there I use a shorter delay.
 
 
+
 -- constants
 local RC_OPTION = {RunCamControl=78}
 local AuxSwitchPos = {LOW=0, MIDDLE=1, HIGH=2}
@@ -44,7 +45,6 @@ function update()
    local is_armed = arming:is_armed()
 
    local delay = DELAY_SHORT
-
    if is_armed ~= prev_armed then
       -- a state transition has occurred
       if is_armed then
@@ -55,8 +55,6 @@ function update()
          rc:run_aux_function(RC_OPTION.RunCamControl, AuxSwitchPos.LOW)
       end
       delay = DELAY_LONG
-   else
-      delay = DELAY_SHORT
    end
 
    prev_armed = is_armed

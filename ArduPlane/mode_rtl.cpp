@@ -7,7 +7,7 @@ bool ModeRTL::_enter()
     plane.do_RTL(plane.get_RTL_altitude_cm());
     plane.rtl.done_climb = false;
 #if HAL_QUADPLANE_ENABLED
-    plane.vtol_approach_s.approach_stage = Plane::Landing_ApproachStage::RTL;
+    plane.vtol_approach_s.approach_stage = Plane::VTOLApproach::Stage::RTL;
 
     // Quadplane specific checks
     if (plane.quadplane.available()) {
@@ -27,12 +27,8 @@ bool ModeRTL::_enter()
         // if VTOL landing is expected and quadplane motors are active and within QRTL radius and under QRTL altitude then switch to QRTL
         const bool vtol_landing = (plane.quadplane.rtl_mode == QuadPlane::RTL_MODE::SWITCH_QRTL) || (plane.quadplane.rtl_mode == QuadPlane::RTL_MODE::VTOL_APPROACH_QRTL);
         if (vtol_landing && (quadplane.motors->get_desired_spool_state() == AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED)) {
-            uint16_t qrtl_radius = abs(plane.g.rtl_radius);
-            if (qrtl_radius == 0) {
-                qrtl_radius = abs(plane.aparm.loiter_radius);
-            }
             int32_t alt_cm;
-            if ((plane.current_loc.get_distance(plane.next_WP_loc) < qrtl_radius) &&
+            if ((plane.current_loc.get_distance(plane.next_WP_loc) < plane.mode_qrtl.get_VTOL_return_radius()) &&
                 plane.current_loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, alt_cm) && (alt_cm < plane.quadplane.qrtl_alt*100)) {
                 plane.set_mode(plane.mode_qrtl, ModeReason::QRTL_INSTEAD_OF_RTL);
                 return true;
@@ -51,8 +47,8 @@ void ModeRTL::update()
     plane.calc_throttle();
 
     bool alt_threshold_reached = false;
-    if (plane.g2.flight_options & FlightOptions::CLIMB_BEFORE_TURN) {
-        // Climb to ALT_HOLD_RTL before turning. This overrides RTL_CLIMB_MIN.
+    if (plane.flight_option_enabled(FlightOptions::CLIMB_BEFORE_TURN)) {
+        // Climb to RTL_ALTITUDE before turning. This overrides RTL_CLIMB_MIN.
         alt_threshold_reached = plane.current_loc.alt > plane.next_WP_loc.alt;
     } else if (plane.g2.rtl_climb_min > 0) {
         /*
@@ -87,7 +83,7 @@ void ModeRTL::navigate()
             AP_Mission::Mission_Command cmd;
             cmd.content.location = plane.next_WP_loc;
             plane.verify_landing_vtol_approach(cmd);
-            if (plane.vtol_approach_s.approach_stage == Plane::Landing_ApproachStage::VTOL_LANDING) {
+            if (plane.vtol_approach_s.approach_stage == Plane::VTOLApproach::Stage::VTOL_LANDING) {
                 plane.set_mode(plane.mode_qrtl, ModeReason::RTL_COMPLETE_SWITCHING_TO_VTOL_LAND_RTL);
             }
             return;
@@ -99,14 +95,21 @@ void ModeRTL::navigate()
     }
 #endif
 
+    uint16_t radius = abs(plane.g.rtl_radius);
+    if (radius > 0) {
+        plane.loiter.direction = (plane.g.rtl_radius < 0) ? -1 : 1;
+    }
+
+    plane.update_loiter(radius);
+
     if (!plane.auto_state.checked_for_autoland) {
         if ((plane.g.rtl_autoland == RtlAutoland::RTL_IMMEDIATE_DO_LAND_START) ||
             (plane.g.rtl_autoland == RtlAutoland::RTL_THEN_DO_LAND_START &&
             plane.reached_loiter_target() && 
-            labs(plane.altitude_error_cm) < 1000))
+            labs(plane.calc_altitude_error_cm()) < 1000))
             {
                 // we've reached the RTL point, see if we have a landing sequence
-                if (plane.mission.jump_to_landing_sequence()) {
+                if (plane.have_position && plane.mission.jump_to_landing_sequence(plane.current_loc)) {
                     // switch from RTL -> AUTO
                     plane.mission.set_force_resume(true);
                     if (plane.set_mode(plane.mode_auto, ModeReason::RTL_COMPLETE_SWITCHING_TO_FIXEDWING_AUTOLAND)) {
@@ -120,13 +123,6 @@ void ModeRTL::navigate()
                 plane.auto_state.checked_for_autoland = true;
             }
     }
-
-    uint16_t radius = abs(plane.g.rtl_radius);
-    if (radius > 0) {
-        plane.loiter.direction = (plane.g.rtl_radius < 0) ? -1 : 1;
-    }
-
-    plane.update_loiter(radius);
 }
 
 #if HAL_QUADPLANE_ENABLED
