@@ -14,6 +14,10 @@
  */
 #pragma once
 
+#include "AP_WindVane_config.h"
+
+#if AP_WINDVANE_ENABLED
+
 #include <AP_Param/AP_Param.h>
 #include <Filter/Filter.h>
 #include <GCS_MAVLink/GCS_MAVLink.h>
@@ -76,15 +80,6 @@ public:
 
     // Return the apparent wind angle used to determin the current tack
     float get_tack_threshold_wind_dir_rad() const { return _direction_tack; }
-    
-    // ZEF get the raw wind direction in body-frame in radians, 0 = head to wind
-    float get_raw_apparent_wind_direction_rad() const { return _direction_apparent_raw; }
-    // ZEF Return apparent wind speed
-    float get_raw_apparent_wind_speed() const { return _speed_apparent_raw; }
-    // ZEF get the raw wind direction in body-frame in radians, 0 = head to wind
-    float get_raw_true_wind_direction_rad() const { return _direction_true_raw; }
-    // ZEF Return true wind speed
-    float get_raw_true_wind_speed() const { return _speed_true_raw; }
 
     // enum defining current tack
     enum Sailboat_Tack {
@@ -171,22 +166,38 @@ private:
 
     enum WindVaneType {
         WINDVANE_NONE           = 0,
+#if AP_WINDVANE_HOME_ENABLED
         WINDVANE_HOME_HEADING   = 1,
         WINDVANE_PWM_PIN        = 2,
+#endif
+#if AP_WINDVANE_ANALOG_ENABLED
         WINDVANE_ANALOG_PIN     = 3,
+#endif
+#if AP_WINDVANE_NMEA_ENABLED
         WINDVANE_NMEA           = 4,
+#endif
+#if AP_WINDVANE_SIM_ENABLED
         WINDVANE_SITL_TRUE      = 10,
         WINDVANE_SITL_APPARENT  = 11,
+#endif
     };
 
     enum Speed_type {
         WINDSPEED_NONE               = 0,
+#if AP_WINDVANE_AIRSPEED_ENABLED
         WINDSPEED_AIRSPEED           = 1,
+#endif
         WINDVANE_WIND_SENSOR_REV_P   = 2,
+#if AP_WINDVANE_RPM_ENABLED
         WINDSPEED_RPM                = 3,
+#endif
+#if AP_WINDVANE_NMEA_ENABLED
         WINDSPEED_NMEA               = 4,
+#endif
+#if AP_WINDVANE_SIM_ENABLED
         WINDSPEED_SITL_TRUE          = 10,
         WINDSPEED_SITL_APPARENT      = 11,
+#endif
     };
 
     static AP_WindVane *_singleton;
@@ -195,3 +206,5 @@ private:
 namespace AP {
     AP_WindVane *windvane();
 };
+
+#endif  // AP_WINDVANE_ENABLED

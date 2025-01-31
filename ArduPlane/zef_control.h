@@ -1,30 +1,33 @@
 #include <math.h>
 #include <AP_Vehicle/AP_Vehicle.h>
+#include <AP_Math/AP_Math.h>
 #include "Plane.h"
 //#include "quadplane.h"
 #include "zef_k_matrix.h"
 
 class ZefControl {
 private:
-    //double F_max_mot = 42;//64.0; //newtons
-    //double F_min_mot = 2.0;//0.003*F_max_mot; //0.57; //newtons
-    double F_max_mot = 2.1498E+01; //42;//64.0; //newtons
-    double F_min_mot = 8.8993E-01; //2.0;//0.003*F_max_mot; //0.57; //newtons
+    double antagonist_force = 3.0E+00;
+    double comando_minimo = 2.0E-01; //0.2
+    double comando_maximo = 1.0E+00;//1.0;
+
+    /*
+        Força mínima: 0.36
+        Força máxima: 15
+        Coeficiente quadrático: 0
+        Coeficiente linear: 5.38e-2
+        Coeficiente constante: 1.81e-1   
+    */
+
+    double F_max_mot = 2.1E+01; //2.1498E+01; //newtons
+    double F_min_mot = 3.0E-01; //8.8993E-01; //newtons
     
-    //double comando_minimo = 0.2;
-    //double comando_maximo = 0.70;
-    double comando_minimo = 4.0000E-01; //0.2;
-    double comando_maximo = 1.0000E+00; //0.70;
-    
-    //double coeficiente_quadratico_forca = -1.17e-04;
-    //double coeficiente_linear_forca = 1.72e-02;
-    //double coeficiente_nulo_forca = 1.85e-01;
     //a*	-2,3469E-04
     //b*	3,4369E-02
     //c*	3,6960E-01
-    double coeficiente_quadratico_forca = -2.3469E-04;
-    double coeficiente_linear_forca = 3.4369E-02;
-    double coeficiente_nulo_forca = 3.6960E-01;
+    double coeficiente_quadratico_forca = -1.68E-04;   //-2.3469E-04;
+    double coeficiente_linear_forca = 4.19E-02; //5.38e-2; //3.4369E-02;
+    double coeficiente_nulo_forca = 1.87E-01;   //3.6960E-01;
     
     int ref_index = 0; // curr index for the bellow array
     double speed_refs[40] = {1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0,16.0,17.0,18.0,19.0,20.0,21.0,22.0,23.0,24.0,25.0,26.0,27.0,28.0,29.0,30.0,31.0,32.0,33.0,34.0,35.0,36.0,37.0,38.0,39.0}; //speeds references to change the active K matrix
@@ -110,6 +113,7 @@ public:
     void operateInflators(AP_Baro *barometer, float min_p, float max_p, int deactivate_unit);
     void stopInflators();
     
+    Vector3f rotate_inertial_to_body(float roll, float pitch, float yaw, const Vector3f &inertial_vector);
     void getPositionError(double desired_position_lat, double desired_position_long, double desired_position_alt, double current_position_lat, double current_position_long, double current_position_alt, double azimute, double (&ret_errors)[3]);
     
     int tca_initialized = 0;

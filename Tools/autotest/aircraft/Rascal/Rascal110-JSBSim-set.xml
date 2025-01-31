@@ -48,8 +48,8 @@ dynamics model, and external 3D model.
    <internal archive="y">true</internal>
    <config>
      <x-offset-m archive="y">0.0</x-offset-m>
-     <y-offset-m archive="y">0.15</y-offset-m>
-     <z-offset-m archive="y">0.2</z-offset-m>
+     <y-offset-m archive="y">-0.15</y-offset-m>
+     <z-offset-m archive="y">0.9</z-offset-m>
      <pitch-offset-deg>0</pitch-offset-deg>
    </config>
   </view>

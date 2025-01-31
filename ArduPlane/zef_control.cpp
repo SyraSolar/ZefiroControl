@@ -1,6 +1,7 @@
 #include <AP_Baro/AP_Baro.h>
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Vehicle/AP_Vehicle.h>
+#include <AP_Math/AP_Math.h>
 
 //#include <AP_HAL_ChibiOS/AP_HAL_ChibiOS.h>
 /*#include <AP_HAL_ChibiOS/hwdef/common/halconf.h>
@@ -22,7 +23,7 @@
 
 #include <AP_Notify/AP_Notify.h>
 #include <AP_Notify/Display.h>
-#include <AP_Notify/Display_tca.h>
+//#include <AP_Notify/Display_>
 
 #include "Plane.h"
 #include "zef_control.h"
@@ -94,6 +95,11 @@ void ZefControl::add_traction(double (&U_array)[12], double longit_speed) {
             //GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "%d >>> old_U: %f --- new_U: %f --- f: %f", i, old_U, U_array[i], f_static);
         }
     }
+    
+    U_array[0] += antagonist_force;
+    U_array[2] += antagonist_force*-1;
+    U_array[4] += antagonist_force;
+    U_array[6] += antagonist_force*-1;
 
     /*# adicionar a tração para manter a posição (@carlos, favor confirmar se entra separado realmente)
     --> impares pois são a componente X... Y são pares
@@ -298,6 +304,9 @@ void ZefControl::print_output_data() {
     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "ang v cima: %f -- ang v baixo: %f", dvu_ang_estab_vert_cima, dvd_ang_estab_vert_baixo);
     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "ang h dir: %f -- ang h esq: %f", dhr_ang_estab_horiz_direito, dhl_ang_estab_horiz_esquerdo);
 }
+
+double sign(double x);
+double min(double x, double y);
 
 double sign(double x) {
     if (x > 0) return 1;
@@ -511,6 +520,19 @@ void ZefControl::stopInflators(){
     hal.gpio->write(gpio_pin, 0);
     hal.gpio->pinMode(gpio_pin+1, HAL_GPIO_OUTPUT);
     hal.gpio->write(gpio_pin+1, 0);
+}
+
+// Função para criar um quaternion a partir de roll, pitch e yaw e rotacionar o vetor
+Vector3f ZefControl::rotate_inertial_to_body(float roll, float pitch, float yaw, const Vector3f &inertial_vector) {
+    // Criar um quaternion a partir dos ângulos de Euler (roll, pitch, yaw)
+    Quaternion q;
+    q.from_euler(roll, pitch, yaw);
+
+    // Rotacionar o vetor do referencial inercial para o referencial da aeronave
+    Vector3f body_vector = inertial_vector;
+    q.earth_to_body(body_vector);
+
+    return body_vector;
 }
 
 void ZefControl::getPositionError(double desired_position_lat, double desired_position_long, double desired_position_alt, double current_position_lat, double current_position_long, double current_position_alt, double azimute, double (&ret_errors)[3]) {

@@ -14,6 +14,10 @@
  */
 #pragma once
 
+#include "AP_Compass_config.h"
+
+#if AP_COMPASS_AK09916_ENABLED
+
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL/I2CDevice.h>
@@ -48,6 +52,7 @@ public:
                                      bool force_external,
                                      enum Rotation rotation);
 
+#if AP_COMPASS_ICM20948_ENABLED
     /* Probe for AK09916 on auxiliary bus of ICM20948, connected through I2C */
     static AP_Compass_Backend *probe_ICM20948(AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev,
                                              AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev_icm,
@@ -62,12 +67,21 @@ public:
 	/* Probe for AK09916 on auxiliary bus of ICM20948, connected through I2C */
     static AP_Compass_Backend *probe_ICM20948_I2C(uint8_t mpu9250_instance,
                                              enum Rotation rotation);
+#endif
 
     static constexpr const char *name = "AK09916";
 
     virtual ~AP_Compass_AK09916();
 
     void read() override;
+
+    /* Must be public so the BusDriver can access its definition */
+    struct PACKED sample_regs {
+        uint8_t st1;
+        int16_t val[3];
+        uint8_t tmps;
+        uint8_t st2;
+    };
 
 private:
     AP_Compass_AK09916(AP_AK09916_BusDriver *bus, bool force_external,
@@ -91,6 +105,7 @@ private:
     bool _initialized;
     enum Rotation _rotation;
     enum AP_Compass_Backend::DevTypes _devtype;
+    uint8_t no_data;
 };
 
 
@@ -191,3 +206,5 @@ private:
     AuxiliaryBusSlave *_slave;
     bool _started;
 };
+
+#endif  // AP_COMPASS_AK09916_ENABLED

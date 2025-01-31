@@ -12,12 +12,12 @@ end
 
 local function read_mission(file_name)
 
-   -- Open file try and read header
+  -- Open file try and read header
   local file = io.open(file_name,"r")
-  local header = file:read('l')
-  if not header then
+  if not file then
     return update, 1000 --could not read, file probably does not exist
   end
+  local header = file:read('l')
 
   -- check header
   assert(string.find(header,'QGC WPL 110') == 1, file_name .. ': incorrect format')
@@ -61,7 +61,6 @@ local function read_mission(file_name)
     end
     index = index + 1
   end
-  file:close()
 end
 
 function update()
@@ -84,5 +83,7 @@ function update()
   end
   return update, 1000
 end
+
+gcs:send_text(5,"Loaded MissionSelector.lua")
 
 return update, 5000

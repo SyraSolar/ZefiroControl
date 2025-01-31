@@ -1,17 +1,20 @@
 /*
   ArduPilot filesystem interface for systems using the FATFS filesystem
  */
+#include "AP_Filesystem_config.h"
+
+#if AP_FILESYSTEM_FATFS_ENABLED
+
 #include "AP_Filesystem.h"
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Math/AP_Math.h>
 #include <stdio.h>
-#include <AP_RTC/AP_RTC.h>
-
-#if HAVE_FILESYSTEM_SUPPORT && CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
+#include <AP_Common/time.h>
 
 #include <ff.h>
 #include <AP_HAL_ChibiOS/sdcard.h>
 #include <GCS_MAVLink/GCS.h>
+#include <AP_HAL_ChibiOS/hwdef/common/stm32_util.h>
 
 #if 0
 #define debug(fmt, args ...)  do {printf("%s:%d: " fmt "\n", __FUNCTION__, __LINE__, ## args); } while(0)
@@ -44,7 +47,7 @@ typedef struct {
 #define MAX_FILES 16
 static FAT_FILE *file_table[MAX_FILES];
 
-static int isatty_(int fileno)
+static bool isatty_(int fileno)
 {
     if (fileno >= 0 && fileno <= 2) {
         return true;
@@ -414,7 +417,10 @@ int32_t AP_Filesystem_FATFS::read(int fd, void *buf, uint32_t count)
     UINT total = 0;
     do {
         UINT size = 0;
-        UINT n = MIN(bytes, MAX_IO_SIZE);
+        UINT n = bytes;
+        if (!mem_is_dma_safe(buf, count, true)) {
+            n = MIN(bytes, MAX_IO_SIZE);
+        }
         res = f_read(fh, (void *)buf, n, &size);
         if (res != FR_OK) {
             errno = fatfs_to_errno((FRESULT)res);
@@ -458,7 +464,10 @@ int32_t AP_Filesystem_FATFS::write(int fd, const void *buf, uint32_t count)
 
     UINT total = 0;
     do {
-        UINT n = MIN(bytes, MAX_IO_SIZE);
+        UINT n = bytes;
+        if (!mem_is_dma_safe(buf, count, true)) {
+            n = MIN(bytes, MAX_IO_SIZE);
+        }
         UINT size = 0;
         res = f_write(fh, buf, n, &size);
         if (res == FR_DISK_ERR && RETRY_ALLOWED()) {
@@ -562,7 +571,7 @@ static time_t fat_time_to_unix(uint16_t date, uint16_t time)
     tp.tm_mday = (date & 0x1f);
     tp.tm_mon = ((date >> 5) & 0x0f) - 1;
     tp.tm_year = ((date >> 9) & 0x7f) + 80;
-    unix = AP::rtc().mktime(&tp);
+    unix = ap_mktime(&tp);
     return unix;
 }
 
@@ -665,6 +674,22 @@ int AP_Filesystem_FATFS::mkdir(const char *pathname)
     return 0;
 }
 
+int AP_Filesystem_FATFS::rename(const char *oldpath, const char *newpath)
+{
+    FS_CHECK_ALLOWED(-1);
+    WITH_SEMAPHORE(sem);
+
+    errno = 0;
+
+    int res = f_rename(oldpath, newpath);
+    if (res != FR_OK) {
+        errno = fatfs_to_errno((FRESULT)res);
+        return -1;
+    }
+
+    return 0;
+}
+
 /*
   wrapper structure to associate a dirent with a DIR
  */
@@ -681,7 +706,7 @@ void *AP_Filesystem_FATFS::opendir(const char *pathdir)
     CHECK_REMOUNT_NULL();
 
     debug("Opendir %s", pathdir);
-    struct DIR_Wrapper *ret = new DIR_Wrapper;
+    struct DIR_Wrapper *ret = NEW_NOTHROW DIR_Wrapper;
     if (!ret) {
         return nullptr;
     }
@@ -803,7 +828,8 @@ int64_t AP_Filesystem_FATFS::disk_space(const char *path)
  */
 static void unix_time_to_fat(time_t epoch, uint16_t &date, uint16_t &time)
 {
-    struct tm *t = gmtime((time_t *)&epoch);
+    struct tm tmd {};
+    struct tm *t = gmtime_r((time_t *)&epoch, &tmd);
 
     /* Pack date and time into a uint32_t variable */
     date = ((uint16_t)(t->tm_year - 80) << 9)
@@ -861,9 +887,9 @@ bool AP_Filesystem_FATFS::format(void)
 #if FF_USE_MKFS
     WITH_SEMAPHORE(sem);
     hal.scheduler->register_io_process(FUNCTOR_BIND_MEMBER(&AP_Filesystem_FATFS::format_handler, void));
-    // the format is handled asyncronously, we inform user of success
-    // via a text message
-    format_pending = true;
+    // the format is handled asynchronously, we inform user of success
+    // via a text message.  format_status can be polled for progress
+    format_status = FormatStatus::PENDING;
     return true;
 #else
     return false;
@@ -876,11 +902,11 @@ bool AP_Filesystem_FATFS::format(void)
 void AP_Filesystem_FATFS::format_handler(void)
 {
 #if FF_USE_MKFS
-    if (!format_pending) {
+    if (format_status != FormatStatus::PENDING) {
         return;
     }
     WITH_SEMAPHORE(sem);
-    format_pending = false;
+    format_status = FormatStatus::IN_PROGRESS;
     GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "Formatting SDCard");
     uint8_t *buf = (uint8_t *)hal.util->malloc_type(FF_MAX_SS, AP_HAL::Util::MEM_DMA_SAFE);
     if (buf == nullptr) {
@@ -890,13 +916,22 @@ void AP_Filesystem_FATFS::format_handler(void)
     auto ret = f_mkfs("0:", 0, buf, FF_MAX_SS);
     hal.util->free_type(buf, FF_MAX_SS, AP_HAL::Util::MEM_DMA_SAFE);
     if (ret == FR_OK) {
+        format_status = FormatStatus::SUCCESS;
         GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "Format: OK");
     } else {
+        format_status = FormatStatus::FAILURE;
         GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "Format: Failed (%d)", int(ret));
     }
     sdcard_stop();
     sdcard_retry();
 #endif
+}
+
+// returns true if we are currently formatting the SD card:
+AP_Filesystem_Backend::FormatStatus AP_Filesystem_FATFS::get_format_status(void) const
+{
+    // note that format_handler holds sem, so we can't take it here.
+    return format_status;
 }
 
 /*
@@ -950,4 +985,4 @@ char *strerror(int errnum)
     return NULL;
 }
 
-#endif // CONFIG_HAL_BOARD
+#endif  // AP_FILESYSTEM_FATFS_ENABLED

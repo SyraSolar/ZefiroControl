@@ -161,12 +161,6 @@ void GCS_MAVLINK_Tracker::send_pid_tuning()
     }
 }
 
-bool GCS_MAVLINK_Tracker::handle_guided_request(AP_Mission::Mission_Command&)
-{
-    // do nothing
-    return false;
-}
-
 /*
   default stream rates to 1Hz
  */
@@ -270,17 +264,30 @@ static const ap_message STREAM_RAW_SENSORS_msgs[] = {
     MSG_SCALED_PRESSURE,
     MSG_SCALED_PRESSURE2,
     MSG_SCALED_PRESSURE3,
+#if AP_AIRSPEED_ENABLED
+    MSG_AIRSPEED,
+#endif
 };
 static const ap_message STREAM_EXTENDED_STATUS_msgs[] = {
     MSG_SYS_STATUS,
     MSG_POWER_STATUS,
+#if HAL_WITH_MCU_MONITORING
     MSG_MCU_STATUS,
+#endif
     MSG_MEMINFO,
     MSG_NAV_CONTROLLER_OUTPUT,
+#if AP_GPS_GPS_RAW_INT_SENDING_ENABLED
     MSG_GPS_RAW,
+#endif
+#if AP_GPS_GPS_RTK_SENDING_ENABLED
     MSG_GPS_RTK,
+#endif
+#if AP_GPS_GPS2_RAW_SENDING_ENABLED
     MSG_GPS2_RAW,
+#endif
+#if AP_GPS_GPS2_RTK_SENDING_ENABLED
     MSG_GPS2_RTK,
+#endif
 };
 static const ap_message STREAM_POSITION_msgs[] = {
     MSG_LOCATION,
@@ -291,7 +298,9 @@ static const ap_message STREAM_RAW_CONTROLLER_msgs[] = {
 };
 static const ap_message STREAM_RC_CHANNELS_msgs[] = {
     MSG_RC_CHANNELS,
+#if AP_MAVLINK_MSG_RC_CHANNELS_RAW_ENABLED
     MSG_RC_CHANNELS_RAW, // only sent on a mavlink1 connection
+#endif
 };
 static const ap_message STREAM_EXTRA1_msgs[] = {
     MSG_ATTITUDE,
@@ -299,15 +308,21 @@ static const ap_message STREAM_EXTRA1_msgs[] = {
 };
 static const ap_message STREAM_EXTRA3_msgs[] = {
     MSG_AHRS,
+#if AP_SIM_ENABLED
     MSG_SIMSTATE,
+#endif
     MSG_SYSTEM_TIME,
     MSG_AHRS2,
+#if COMPASS_CAL_ENABLED
     MSG_MAG_CAL_REPORT,
     MSG_MAG_CAL_PROGRESS,
+#endif
     MSG_EKF_STATUS_REPORT,
+    MSG_BATTERY_STATUS,
 };
 static const ap_message STREAM_PARAMS_msgs[] = {
-    MSG_NEXT_PARAM
+    MSG_NEXT_PARAM,
+    MSG_AVAILABLE_MODES
 };
 
 const struct GCS_MAVLINK::stream_entries GCS_MAVLINK::all_stream_entries[] = {
@@ -402,9 +417,9 @@ uint8_t GCS_MAVLINK_Tracker::sysid_my_gcs() const
     return tracker.g.sysid_my_gcs;
 }
 
-MAV_RESULT GCS_MAVLINK_Tracker::_handle_command_preflight_calibration_baro()
+MAV_RESULT GCS_MAVLINK_Tracker::_handle_command_preflight_calibration_baro(const mavlink_message_t &msg)
 {
-    MAV_RESULT ret = GCS_MAVLINK::_handle_command_preflight_calibration_baro();
+    MAV_RESULT ret = GCS_MAVLINK::_handle_command_preflight_calibration_baro(msg);
     if (ret == MAV_RESULT_ACCEPTED) {
         // zero the altitude difference on next baro update
         tracker.nav_status.need_altitude_calibration = true;
@@ -412,7 +427,7 @@ MAV_RESULT GCS_MAVLINK_Tracker::_handle_command_preflight_calibration_baro()
     return ret;
 }
 
-MAV_RESULT GCS_MAVLINK_Tracker::handle_command_component_arm_disarm(const mavlink_command_long_t &packet)
+MAV_RESULT GCS_MAVLINK_Tracker::handle_command_component_arm_disarm(const mavlink_command_int_t &packet)
 {
     if (is_equal(packet.param1,1.0f)) {
         tracker.arm_servos();
@@ -425,11 +440,8 @@ MAV_RESULT GCS_MAVLINK_Tracker::handle_command_component_arm_disarm(const mavlin
     return MAV_RESULT_UNSUPPORTED;
 }
 
-MAV_RESULT GCS_MAVLINK_Tracker::handle_command_long_packet(const mavlink_command_long_t &packet)
+MAV_RESULT GCS_MAVLINK_Tracker::handle_command_int_packet(const mavlink_command_int_t &packet, const mavlink_message_t &msg)
 {
-    // do command
-    send_text(MAV_SEVERITY_INFO,"Command received: ");
-
     switch(packet.command) {
 
     case MAV_CMD_DO_SET_SERVO:
@@ -447,18 +459,11 @@ MAV_RESULT GCS_MAVLINK_Tracker::handle_command_long_packet(const mavlink_command
         return MAV_RESULT_ACCEPTED;
 
     default:
-        return GCS_MAVLINK::handle_command_long_packet(packet);
+        return GCS_MAVLINK::handle_command_int_packet(packet, msg);
     }
 }
 
-bool GCS_MAVLINK_Tracker::set_home_to_current_location(bool _lock) {
-    return tracker.set_home(AP::gps().location());
-}
-bool GCS_MAVLINK_Tracker::set_home(const Location& loc, bool _lock) {
-    return tracker.set_home(loc);
-}
-
-void GCS_MAVLINK_Tracker::handleMessage(const mavlink_message_t &msg)
+void GCS_MAVLINK_Tracker::handle_message(const mavlink_message_t &msg)
 {
     switch (msg.msgid) {
 
@@ -466,9 +471,38 @@ void GCS_MAVLINK_Tracker::handleMessage(const mavlink_message_t &msg)
         handle_set_attitude_target(msg);
         break;
 
+#if AP_TRACKER_SET_HOME_VIA_MISSION_UPLOAD_ENABLED
     // When mavproxy 'wp sethome' 
     case MAVLINK_MSG_ID_MISSION_WRITE_PARTIAL_LIST:
-    {
+        handle_message_mission_write_partial_list(msg);
+        break;
+
+    // XXX receive a WP from GCS and store in EEPROM if it is HOME
+    case MAVLINK_MSG_ID_MISSION_ITEM:
+        handle_message_mission_item(msg);
+        break;
+#endif
+
+    case MAVLINK_MSG_ID_MANUAL_CONTROL:
+        handle_message_manual_control(msg);
+        break;
+
+    case MAVLINK_MSG_ID_GLOBAL_POSITION_INT:
+        handle_message_global_position_int(msg);
+        break;
+
+    case MAVLINK_MSG_ID_SCALED_PRESSURE:
+        handle_message_scaled_pressure(msg);
+        break;
+    }
+
+    GCS_MAVLINK::handle_message(msg);
+}
+
+
+#if AP_TRACKER_SET_HOME_VIA_MISSION_UPLOAD_ENABLED
+void GCS_MAVLINK_Tracker::handle_message_mission_write_partial_list(const mavlink_message_t &msg)
+{
         // decode
         mavlink_mission_write_partial_list_t packet;
         mavlink_msg_mission_write_partial_list_decode(&msg, &packet);
@@ -478,19 +512,16 @@ void GCS_MAVLINK_Tracker::handleMessage(const mavlink_message_t &msg)
             waypoint_receiving = true;
             send_message(MSG_NEXT_MISSION_REQUEST_WAYPOINTS);
         }
-        break;
-    }
+}
 
-    // XXX receive a WP from GCS and store in EEPROM if it is HOME
-    case MAVLINK_MSG_ID_MISSION_ITEM:
-    {
-        // decode
+void GCS_MAVLINK_Tracker::handle_message_mission_item(const mavlink_message_t &msg)
+{
         mavlink_mission_item_t packet;
         MAV_MISSION_RESULT result = MAV_MISSION_ACCEPTED;
 
         mavlink_msg_mission_item_decode(&msg, &packet);
 
-        struct Location tell_command;
+        Location tell_command;
 
         switch (packet.frame)
         {
@@ -558,7 +589,7 @@ void GCS_MAVLINK_Tracker::handleMessage(const mavlink_message_t &msg)
 
         // check if this is the HOME wp
         if (packet.seq == 0) {
-            if (!tracker.set_home(tell_command)) {
+            if (!tracker.set_home(tell_command, false)) {
                 result = MAV_MISSION_ERROR;
                 goto mission_failed;
             }
@@ -567,48 +598,37 @@ void GCS_MAVLINK_Tracker::handleMessage(const mavlink_message_t &msg)
         }
 
 mission_failed:
-        // we are rejecting the mission/waypoint
+        // send ACK (including in success case)
         mavlink_msg_mission_ack_send(
             chan,
             msg.sysid,
             msg.compid,
             result,
             MAV_MISSION_TYPE_MISSION);
-        break;
-    }
+}
+#endif
 
-    case MAVLINK_MSG_ID_MANUAL_CONTROL:
-    {
+void GCS_MAVLINK_Tracker::handle_message_manual_control(const mavlink_message_t &msg)
+{
         mavlink_manual_control_t packet;
         mavlink_msg_manual_control_decode(&msg, &packet);
         tracker.tracking_manual_control(packet);
-        break;
-    }
+}
 
-    case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: 
-    {
+void GCS_MAVLINK_Tracker::handle_message_global_position_int(const mavlink_message_t &msg)
+{
         // decode
         mavlink_global_position_int_t packet;
         mavlink_msg_global_position_int_decode(&msg, &packet);
         tracker.tracking_update_position(packet);
-        break;
-    }
+}
 
-    case MAVLINK_MSG_ID_SCALED_PRESSURE: 
-    {
-        // decode
+void GCS_MAVLINK_Tracker::handle_message_scaled_pressure(const mavlink_message_t &msg)
+{
         mavlink_scaled_pressure_t packet;
         mavlink_msg_scaled_pressure_decode(&msg, &packet);
         tracker.tracking_update_pressure(packet);
-        break;
-    }
-
-    default:
-        handle_common_message(msg);
-        break;
-    } // end switch
-} // end handle mavlink
-
+}
 
 // send position tracker is using
 void GCS_MAVLINK_Tracker::send_global_position_int()
@@ -629,4 +649,44 @@ void GCS_MAVLINK_Tracker::send_global_position_int()
         0,                        // Y speed cm/s (+ve East)
         0,                        // Z speed cm/s (+ve Down)
         tracker.ahrs.yaw_sensor); // compass heading in 1/100 degree
+}
+
+// Send the mode with the given index (not mode number!) return the total number of modes
+// Index starts at 1
+uint8_t GCS_MAVLINK_Tracker::send_available_mode(uint8_t index) const
+{
+    const Mode* modes[] {
+        &tracker.mode_manual,
+        &tracker.mode_stop,
+        &tracker.mode_scan,
+        &tracker.mode_guided,
+        &tracker.mode_servotest,
+        &tracker.mode_auto,
+        &tracker.mode_initialising,
+    };
+
+    const uint8_t mode_count = ARRAY_SIZE(modes);
+
+    // Convert to zero indexed
+    const uint8_t index_zero = index - 1;
+    if (index_zero >= mode_count) {
+        // Mode does not exist!?
+        return mode_count;
+    }
+
+    // Ask the mode for its name and number
+    const char* name = modes[index_zero]->name();
+    const uint8_t mode_number = (uint8_t)modes[index_zero]->number();
+
+    mavlink_msg_available_modes_send(
+        chan,
+        mode_count,
+        index,
+        MAV_STANDARD_MODE::MAV_STANDARD_MODE_NON_STANDARD,
+        mode_number,
+        0, // MAV_MODE_PROPERTY bitmask
+        name
+    );
+
+    return mode_count;
 }

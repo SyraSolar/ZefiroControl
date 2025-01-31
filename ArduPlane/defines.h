@@ -8,6 +8,8 @@
 
 #define MIN_AIRSPEED_MIN 5 // m/s, used for arming check and speed scaling
 
+#define TAKEOFF_RUDDER_WARNING_TIMEOUT 3000 //ms that GCS warning about not returning arming rudder to neutral repeats
+
 // failsafe
 // ----------------------
 enum failsafe_state {
@@ -42,13 +44,14 @@ enum failsafe_action_long {
     FS_ACTION_LONG_RTL = 1,
     FS_ACTION_LONG_GLIDE = 2,
     FS_ACTION_LONG_PARACHUTE = 3,
+    FS_ACTION_LONG_AUTO = 4,
 };
 
 // type of stick mixing enabled
 enum class StickMixing {
     NONE     = 0,
     FBW      = 1,
-    DIRECT   = 2,
+    DIRECT_REMOVED = 2,
     VTOL_YAW = 3,
 };
 
@@ -60,18 +63,6 @@ enum class RtlAutoland {
     NO_RTL_GO_AROUND = 3,
 };
     
-
-enum ChannelMixing {
-    MIXING_DISABLED = 0,
-    MIXING_UPUP     = 1,
-    MIXING_UPDN     = 2,
-    MIXING_DNUP     = 3,
-    MIXING_DNDN     = 4,
-    MIXING_UPUP_SWP = 5,
-    MIXING_UPDN_SWP = 6,
-    MIXING_DNUP_SWP = 7,
-    MIXING_DNDN_SWP = 8,
-};
 
 // PID broadcast bitmask
 enum tuning_pid_bits {
@@ -99,6 +90,8 @@ enum log_messages {
     LOG_PIDG_MSG,
     LOG_AETR_MSG,
     LOG_OFG_MSG,
+    LOG_TSIT_MSG,
+    LOG_TILT_MSG,
 };
 
 #define MASK_LOG_ATTITUDE_FAST          (1<<0)
@@ -120,6 +113,7 @@ enum log_messages {
 #define MASK_LOG_IMU_RAW                (1UL<<19)
 #define MASK_LOG_ATTITUDE_FULLRATE      (1U<<20)
 #define MASK_LOG_VIDEO_STABILISATION    (1UL<<21)
+#define MASK_LOG_NOTCH_FULLRATE         (1UL<<22)
 
 enum {
     CRASH_DETECT_ACTION_BITMASK_DISABLED = 0,
@@ -156,12 +150,13 @@ enum FlightOptions {
     ACRO_YAW_DAMPER = (1 << 5),
     SURPRESS_TKOFF_SCALING = (1<<6),
     ENABLE_DEFAULT_AIRSPEED = (1<<7),
-    GCS_REMOVE_TRIM_PITCH_CD = (1 << 8),
-    OSD_REMOVE_TRIM_PITCH_CD = (1 << 9),
+    GCS_REMOVE_TRIM_PITCH = (1 << 8),
+    OSD_REMOVE_TRIM_PITCH = (1 << 9),
     CENTER_THROTTLE_TRIM = (1<<10),
     DISABLE_GROUND_PID_SUPPRESSION = (1<<11),
     ENABLE_LOITER_ALT_CONTROL = (1<<12),
-
+    INDICATE_WAITING_FOR_RUDDER_NEUTRAL = (1<<13),
+    IMMEDIATE_CLIMB_IN_AUTO = (1<<14),
 };
 
 enum CrowFlapOptions {

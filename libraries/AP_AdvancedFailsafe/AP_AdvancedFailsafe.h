@@ -20,6 +20,10 @@
   Andrew Tridgell and CanberraUAV, August 2012
 */
 
+#include "AP_AdvancedFailsafe_config.h"
+
+#if AP_ADVANCEDFAILSAFE_ENABLED
+
 #include <AP_Common/AP_Common.h>
 #include <AP_Param/AP_Param.h>
 #include <inttypes.h>
@@ -101,6 +105,9 @@ protected:
     // return the AFS mapped control mode
     virtual enum control_mode afs_mode(void) = 0;
 
+    //to force entering auto mode when datalink loss 
+    virtual void set_mode_auto(void) = 0;
+
     enum state _state;
 
     AP_Int8 _enable;
@@ -119,6 +126,7 @@ protected:
     AP_Int32 _amsl_limit;
     AP_Int32 _amsl_margin_gps;
     AP_Float _rc_fail_time_seconds;
+    AP_Float _gcs_fail_time_seconds;
     AP_Int8  _max_gps_loss;
     AP_Int8  _max_comms_loss;
     AP_Int8  _enable_geofence_fs;
@@ -158,8 +166,19 @@ private:
 
     // update maximum range check
     void max_range_update();
+
+    AP_Int16 options;
+    enum class Option {
+        CONTINUE_AFTER_RECOVERED = (1U<<0),
+        GCS_FS_ALL_AUTONOMOUS_MODES = (1U<<1),
+    };
+    bool option_is_set(Option option) const {
+        return (options.get() & int16_t(option)) != 0;
+    }
 };
 
 namespace AP {
     AP_AdvancedFailsafe *advancedfailsafe();
 };
+
+#endif  // AP_ADVANCEDFAILSAFE_ENABLED

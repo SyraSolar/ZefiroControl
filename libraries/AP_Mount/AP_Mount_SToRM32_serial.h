@@ -3,13 +3,11 @@
  */
 #pragma once
 
-#include "AP_Mount_Backend.h"
-
-#ifndef HAL_MOUNT_STORM32SERIAL_ENABLED
-#define HAL_MOUNT_STORM32SERIAL_ENABLED HAL_MOUNT_ENABLED
-#endif
+#include "AP_Mount_config.h"
 
 #if HAL_MOUNT_STORM32SERIAL_ENABLED
+
+#include "AP_Mount_Backend_Serial.h"
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Math/AP_Math.h>
@@ -17,15 +15,12 @@
 
 #define AP_MOUNT_STORM32_SERIAL_RESEND_MS   1000    // resend angle targets to gimbal once per second
 
-class AP_Mount_SToRM32_serial : public AP_Mount_Backend
+class AP_Mount_SToRM32_serial : public AP_Mount_Backend_Serial
 {
 
 public:
     // Constructor
-    AP_Mount_SToRM32_serial(AP_Mount &frontend, AP_Mount_Params &params, uint8_t instance);
-
-    // init - performs any required initialisation for this instance
-    void init() override;
+    using AP_Mount_Backend_Serial::AP_Mount_Backend_Serial;
 
     // update mount position - should be called periodically
     void update() override;
@@ -131,15 +126,10 @@ private:
 
 
     // internal variables
-    AP_HAL::UARTDriver *_port;
-
-    bool _initialised;              // true once the driver has been initialised
-    MountTarget _angle_rad;         // latest angle target
     uint32_t _last_send;            // system time of last do_mount_control sent to gimbal
-
     uint8_t _reply_length;
     uint8_t _reply_counter;
-    ReplyType _reply_type;
+    ReplyType _reply_type = ReplyType_UNKNOWN;
 
 
     union PACKED SToRM32_reply {

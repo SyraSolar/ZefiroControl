@@ -5,6 +5,10 @@
    generators. It monitors battery voltage and controls the throttle
    of the generator to maintain a target voltage using a PI controller
 --]]
+-- luacheck: only 0
+
+---@diagnostic disable: need-check-nil
+---@diagnostic disable: param-type-mismatch
 
 UPDATE_RATE_HZ = 10
 

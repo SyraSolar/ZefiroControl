@@ -1,12 +1,14 @@
 --[[
  test the load function for loading new code from strings
 --]]
+---@diagnostic disable: undefined-global
 
 gcs:send_text(0,"Testing load() method")
 
 -- a function written as a string. This could come from a file
 -- or any other source (eg. mavlink)
 -- Note that the [[ xxx ]] syntax is just a multi-line string
+
 local func_str = [[
 function TestFunc(x,y)
   return math.sin(x) + math.cos(y)
@@ -21,9 +23,9 @@ function test_load()
       return
    end
    -- run the code within a protected call to catch any errors
-   local success, err = pcall(f)
+   local success, err2 = pcall(f)
    if not success then
-      gcs:send_text(0, string.format("Failed to load TestFunc: %s", err))
+      gcs:send_text(0, string.format("Failed to load TestFunc: %s", err2))
       return
    end
 

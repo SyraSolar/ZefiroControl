@@ -22,7 +22,6 @@ from rstlatexpdfemit import RSTLATEXPDFEmit
 from xmlemit import XmlEmit
 from mdemit import MDEmit
 from jsonemit import JSONEmit
-from xmlemit_mp import XmlEmitMP
 
 parser = ArgumentParser(description="Parse ArduPilot parameters.")
 parser.add_argument("-v", "--verbose", dest='verbose', action='store_true', default=False, help="show debugging output")
@@ -36,7 +35,7 @@ parser.add_argument("--format",
                     dest='output_format',
                     action='store',
                     default='all',
-                    choices=['all', 'html', 'rst', 'rstlatexpdf', 'wiki', 'xml', 'json', 'edn', 'md', 'xml_mp'],
+                    choices=['all', 'html', 'rst', 'rstlatexpdf', 'wiki', 'xml', 'json', 'edn', 'md'],
                     help="what output format to use")
 
 args = parser.parse_args()
@@ -44,7 +43,7 @@ args = parser.parse_args()
 
 # Regular expressions for parsing the parameter metadata
 
-prog_param = re.compile(r"@Param(?:{([^}]+)})?: (\w+).*((?:\n[ \t]*// @(\w+)(?:{([^}]+)})?: ?(.*))+)(?:\n[ \t\r]*\n|\n[ \t]+[A-Z])", re.MULTILINE)  # noqa
+prog_param = re.compile(r"@Param(?:{([^}]+)})?: (\w+).*((?:\n[ \t]*// @(\w+)(?:{([^}]+)})?: ?(.*))+)(?:\n[ \t\r]*\n|\n[ \t]+[A-Z]|\n\-\-\]\])", re.MULTILINE)  # noqa
 
 # match e.g @Value: 0=Unity, 1=Koala, 17=Liability
 prog_param_fields = re.compile(r"[ \t]*// @(\w+): ?([^\r\n]*)")
@@ -66,7 +65,7 @@ def find_vehicle_parameter_filepath(vehicle_name):
         "Sub": "ArduSub",
     }
 
-    # first try ArduCopter/Parmameters.cpp
+    # first try ArduCopter/Parameters.cpp
     for top_dir in apm_path, apm_tools_path:
         path = os.path.join(top_dir, vehicle_name, "Parameters.cpp")
         if os.path.exists(path):
@@ -81,23 +80,46 @@ def find_vehicle_parameter_filepath(vehicle_name):
     raise ValueError("Unable to find parameters file for (%s)" % vehicle_name)
 
 
-libraries = []
-
-# AP_Vehicle also has parameters rooted at "", but isn't referenced
-# from the vehicle in any way:
-ap_vehicle_lib = Library("") # the "" is tacked onto the front of param name
-setattr(ap_vehicle_lib, "Path", os.path.join('..', 'libraries', 'AP_Vehicle', 'AP_Vehicle.cpp'))
-libraries.append(ap_vehicle_lib)
-
-error_count = 0
-current_param = None
-current_file = None
-
-
 def debug(str_to_print):
     """Debug output if verbose is set."""
     if args.verbose:
         print(str_to_print)
+
+
+def lua_applets():
+    '''return list of Library objects for lua applets and drivers'''
+    lua_lib = Library("", reference="Lua Script", not_rst=True, check_duplicates=True)
+    dirs = ["libraries/AP_Scripting/applets", "libraries/AP_Scripting/drivers"]
+    paths = []
+    for d in dirs:
+        for root, dirs, files in os.walk(os.path.join(apm_path, d)):
+            for file in files:
+                if not file.endswith(".lua"):
+                    continue
+                f = os.path.join(root, file)
+                debug("Adding lua path %s" % f)
+                # the library is expected to have the path as a relative path from within
+                # a vehicle directory
+                f = f.replace(apm_path, "../")
+                paths.append(f)
+    setattr(lua_lib, "Path", ','.join(paths))
+    return lua_lib
+
+
+libraries = []
+
+if args.vehicle != "AP_Periph":
+    # AP_Vehicle also has parameters rooted at "", but isn't referenced
+    # from the vehicle in any way:
+    ap_vehicle_lib = Library("", reference="VEHICLE") # the "" is tacked onto the front of param name
+    setattr(ap_vehicle_lib, "Path", os.path.join('..', 'libraries', 'AP_Vehicle', 'AP_Vehicle.cpp'))
+    libraries.append(ap_vehicle_lib)
+
+libraries.append(lua_applets())
+
+error_count = 0
+current_param = None
+current_file = None
 
 
 def error(str_to_print):
@@ -199,6 +221,10 @@ def process_vehicle(vehicle):
             else:
                 error("param: unknown parameter metadata field '%s'" % field[0])
 
+        if (getattr(p, 'Values', None) is not None and
+                getattr(p, 'Bitmask', None) is not None):
+            error("Both @Values and @Bitmask present")
+
         vehicle.params.append(p)
     current_file = None
     debug("Processed %u params" % len(vehicle.params))
@@ -280,6 +306,7 @@ def process_library(vehicle, library, pathprefix=None):
             # a parameter is considered to be vehicle-specific if
             # there does not exist a Values: or Values{VehicleName}
             # for that vehicle but @Values{OtherVehicle} exists.
+            seen_values_or_bitmask_for_this_vehicle = False
             seen_values_or_bitmask_for_other_vehicle = False
             for field in fields:
                 only_for_vehicles = field[1].split(",")
@@ -293,11 +320,26 @@ def process_library(vehicle, library, pathprefix=None):
                     error("tagged param: unknown parameter metadata field '%s'" % field[0])
                     continue
                 if vehicle.name not in only_for_vehicles:
-                    if len(only_for_vehicles) and field[0] in ['Values', 'Bitmask']:
+                    if len(only_for_vehicles) and field[0] in documentation_tags_which_are_comma_separated_nv_pairs:
                         seen_values_or_bitmask_for_other_vehicle = True
                     continue
+
+                append_value = False
+                if field[0] in documentation_tags_which_are_comma_separated_nv_pairs:
+                    if vehicle.name in only_for_vehicles:
+                        if seen_values_or_bitmask_for_this_vehicle:
+                            append_value = hasattr(p, field[0])
+                        seen_values_or_bitmask_for_this_vehicle = True
+                    else:
+                        if seen_values_or_bitmask_for_this_vehicle:
+                            continue
+                        append_value = hasattr(p, field[0])
+
                 value = re.sub('@PREFIX@', library.name, field[2])
-                setattr(p, field[0], value)
+                if append_value:
+                    setattr(p, field[0], getattr(p, field[0]) + ',' + value)
+                else:
+                    setattr(p, field[0], value)
 
             if (getattr(p, 'Values', None) is not None and
                     getattr(p, 'Bitmask', None) is not None):
@@ -314,8 +356,25 @@ def process_library(vehicle, library, pathprefix=None):
                     # applicable for this vehicle.
                     continue
 
-            p.path = path # Add path. Later deleted - only used for duplicates
-            library.params.append(p)
+            if getattr(p, 'Vector3Parameter', None) is not None:
+                params_to_add = []
+                for axis in 'X', 'Y', 'Z':
+                    new_p = copy.copy(p)
+                    new_p.change_name(p.name + "_" + axis)
+                    for a in ["Description"]:
+                        if hasattr(new_p, a):
+                            current = getattr(new_p, a)
+                            setattr(new_p, a, current + " (%s-axis)" % axis)
+                    params_to_add.append(new_p)
+            else:
+                params_to_add = [p]
+
+            for p in params_to_add:
+                p.path = path # Add path. Later deleted - only used for duplicates
+                if library.check_duplicates and library.has_param(p.name):
+                    error("Duplicate parameter %s in %s" % (p.name, library.name))
+                    continue
+                library.params.append(p)
 
         group_matches = prog_groups.findall(p_text)
         debug("Found %u groups" % len(group_matches))
@@ -385,13 +444,16 @@ def clean_param(param):
         for i in valueList:
             (start, sep, end) = i.partition(":")
             if sep != ":":
-                raise ValueError("Expected a colon seperator in (%s)" % (i,))
+                raise ValueError("Expected a colon separator in (%s)" % (i,))
             if len(end) == 0:
                 raise ValueError("Expected a colon-separated string, got (%s)" % i)
             end = end.strip()
             start = start.strip()
             new_valueList.append(":".join([start, end]))
         param.Values = ",".join(new_valueList)
+
+    if hasattr(param, "Vector3Parameter"):
+        delattr(param, "Vector3Parameter")
 
 
 def do_copy_values(vehicle_params, libraries, param):
@@ -400,6 +462,10 @@ def do_copy_values(vehicle_params, libraries, param):
 
     # so go and find the values...
     wanted_name = param.CopyValuesFrom
+    if hasattr(param, 'Vector3Parameter'):
+        suffix = param.name[-2:]
+        wanted_name += suffix
+
     del param.CopyValuesFrom
     for x in vehicle_params:
         name = x.name
@@ -429,6 +495,11 @@ def do_copy_fields(vehicle_params, libraries, param):
     # so go and find the values...
     wanted_name = param.CopyFieldsFrom
     del param.CopyFieldsFrom
+
+    if hasattr(param, 'Vector3Parameter'):
+        suffix = param.name[-2:]
+        wanted_name += suffix
+
     for x in vehicle_params:
         name = x.name
         (v, name) = name.split(":")
@@ -493,7 +564,7 @@ def validate(param, is_library=False):
             i = i.replace(" ", "")
             values.append(i.partition(":")[0])
         if (len(values) != len(set(values))):
-            error("Duplicate values found")
+            error("Duplicate values found" + str({x for x in values if values.count(x) > 1}))
     # Validate units
     if (hasattr(param, "Units")):
         if (param.__dict__["Units"] != "") and (param.__dict__["Units"] not in known_units):
@@ -563,7 +634,6 @@ all_emitters = {
     'rst': RSTEmit,
     'rstlatexpdf': RSTLATEXPDFEmit,
     'md': MDEmit,
-    'xml_mp': XmlEmitMP,
 }
 
 try:
@@ -604,6 +674,8 @@ for emitter_name in emitters_to_use:
             # rename, and on the assumption that an asciibetical sort
             # gives a good layout:
             if emitter_name == 'rst':
+                if library.not_rst:
+                    continue
                 if library.name == 'SIM_':
                     library = copy.deepcopy(library)
                     library.params = sim_params

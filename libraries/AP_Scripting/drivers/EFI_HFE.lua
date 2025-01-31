@@ -1,6 +1,13 @@
 --[[ 
   EFI Scripting backend driver for HFE based on HFEDCN0191 Rev E
 --]]
+-- luacheck: only 0
+---@diagnostic disable: param-type-mismatch
+---@diagnostic disable: redundant-parameter
+---@diagnostic disable: undefined-field
+---@diagnostic disable: missing-parameter
+---@diagnostic disable: need-check-nil
+
 
 -- Check Script uses a miniumum firmware version
 local SCRIPT_AP_VERSION = 4.3
@@ -219,6 +226,7 @@ local function engine_control(_driver)
        efi_state:throttle_position_percent(math.floor((throttle_pos*100/255)+0.5))
        efi_state:ignition_voltage(ecu_voltage)
        efi_state:fuel_pressure(fuel_press*0.001)
+       efi_state:fuel_pressure_status(1) -- Fuel_Pressure_Status::OK
 
        local gram_to_cm3 = EFI_HFE_FUEL_DTY:get() * 0.001
        efi_state:fuel_consumption_rate_cm3pm((fuel_flow_gph/60.0) * gram_to_cm3)

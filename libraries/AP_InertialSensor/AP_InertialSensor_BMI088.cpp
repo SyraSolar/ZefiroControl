@@ -84,7 +84,7 @@ AP_InertialSensor_BMI088::probe(AP_InertialSensor &imu,
     if (!dev_accel || !dev_gyro) {
         return nullptr;
     }
-    auto sensor = new AP_InertialSensor_BMI088(imu, std::move(dev_accel), std::move(dev_gyro), rotation);
+    auto sensor = NEW_NOTHROW AP_InertialSensor_BMI088(imu, std::move(dev_accel), std::move(dev_gyro), rotation);
 
     if (!sensor) {
         return nullptr;
@@ -400,7 +400,7 @@ void AP_InertialSensor_BMI088::read_fifo_gyro(void)
     }
     const float scale = radians(2000.0f) / 32767.0f;
     const uint8_t max_frames = 8;
-    const Vector3i bad_frame{int16_t(0xffff), int16_t(0xffff), int16_t(0xffff)};
+    const Vector3i bad_frame{INT16_MIN,INT16_MIN,INT16_MIN};
     Vector3i data[max_frames];
 
     if (num_frames & 0x80) {
@@ -429,7 +429,6 @@ void AP_InertialSensor_BMI088::read_fifo_gyro(void)
     // data is 16 bits with 2000dps range
     for (uint8_t i = 0; i < num_frames; i++) {
         if (data[i] == bad_frame) {
-            _inc_gyro_error_count(gyro_instance);
             continue;
         }
         Vector3f gyro(data[i].x, data[i].y, data[i].z);

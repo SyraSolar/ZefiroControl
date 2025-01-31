@@ -15,6 +15,8 @@
 
 #include "AP_Compass_MMC5xx3.h"
 
+#if AP_COMPASS_MMC5XX3_ENABLED
+
 #include <AP_HAL/AP_HAL.h>
 #include <stdio.h>
 
@@ -47,7 +49,7 @@ AP_Compass_Backend *AP_Compass_MMC5XX3::probe(AP_HAL::OwnPtr<AP_HAL::Device> dev
     if (!dev) {
         return nullptr;
     }
-    AP_Compass_MMC5XX3 *sensor = new AP_Compass_MMC5XX3(std::move(dev), force_external, rotation);
+    AP_Compass_MMC5XX3 *sensor = NEW_NOTHROW AP_Compass_MMC5XX3(std::move(dev), force_external, rotation);
     if (!sensor || !sensor->init()) {
         delete sensor;
         return nullptr;
@@ -61,14 +63,14 @@ AP_Compass_MMC5XX3::AP_Compass_MMC5XX3(AP_HAL::OwnPtr<AP_HAL::Device> _dev,
                                        enum Rotation _rotation)
     : dev(std::move(_dev))
     , force_external(_force_external)
-    , rotation(_rotation)
     , have_initial_offset(false)
+    , rotation(_rotation)
 {
 }
 
 bool AP_Compass_MMC5XX3::init()
 {
-    // take i2c bus sempahore
+    // take i2c bus semaphore
     WITH_SEMAPHORE(dev->get_semaphore());
 
     dev->set_retries(10);
@@ -99,9 +101,10 @@ bool AP_Compass_MMC5XX3::init()
     // 10ms minimum startup time
     hal.scheduler->delay(15);
 
-    if (!dev->write_register(REG_CONTROL1, REG_CONTROL1_BW0 | REG_CONTROL1_BW1)) {
+    // setup for 100Hz output
+    if (!dev->write_register(REG_CONTROL1, 0)) {
         return false;
-    } //  // This BW config sets the sensor measurement time to 0.5ms and filter bandwidth to 800Hz
+    }
 
 
     /* register the compass instance in the frontend */
@@ -112,7 +115,7 @@ bool AP_Compass_MMC5XX3::init()
 
     set_dev_id(compass_instance, dev->get_bus_id());
 
-    printf("Found a MMC5983 on 0x%x as compass %u\n", dev->get_bus_id(), compass_instance);
+    printf("Found a MMC5983 on 0x%x as compass %u\n", unsigned(dev->get_bus_id()), compass_instance);
 
     set_rotation(compass_instance, rotation);
 
@@ -122,8 +125,8 @@ bool AP_Compass_MMC5XX3::init()
 
     dev->set_retries(1);
 
-    // call timer() at 1kHz
-    dev->register_periodic_callback(1000,
+    // call timer() at 100Hz
+    dev->register_periodic_callback(10000U,
                                     FUNCTOR_BIND_MEMBER(&AP_Compass_MMC5XX3::timer, void));
 
     return true;
@@ -132,10 +135,10 @@ bool AP_Compass_MMC5XX3::init()
 void AP_Compass_MMC5XX3::timer()
 {
     // recalculate the offset with set/reset operation every measure_count_limit measurements
-    // sensor is read at about 500Hz, so about every 10 seconds
-    const uint16_t measure_count_limit = 5000;
-    const uint16_t zero_offset = 32768; // 16 bit mode
-    const uint16_t sensitivity = 4096; // counts per Gauss, 16 bit mode
+    // sensor is read at about 100Hz, so about every 10 seconds
+    const uint16_t measure_count_limit = 1000U;
+    const uint16_t zero_offset = 32768U; // 16 bit mode
+    const uint16_t sensitivity = 4096U; // counts per Gauss, 16 bit mode
     constexpr float counts_to_milliGauss = 1.0e3f / sensitivity;
 
     /*
@@ -305,3 +308,6 @@ void AP_Compass_MMC5XX3::read()
 {
     drain_accumulated_samples(compass_instance);
 }
+
+#endif  // AP_COMPASS_MMC5XX3_ENABLED
+

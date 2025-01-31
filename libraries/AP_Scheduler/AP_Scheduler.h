@@ -20,11 +20,9 @@
  */
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
+#include "AP_Scheduler_config.h"
 
-#ifndef HAL_SCHEDULER_ENABLED
-#define HAL_SCHEDULER_ENABLED 1
-#endif
+#if AP_SCHEDULER_ENABLED
 
 #include <AP_Param/AP_Param.h>
 #include <AP_HAL/Semaphores.h>
@@ -32,12 +30,12 @@
 #include <AP_Math/AP_Math.h>
 #include "PerfInfo.h"       // loop perf monitoring
 
-#if HAL_MINIMIZE_FEATURES
-#define AP_SCHEDULER_NAME_INITIALIZER(_clazz,_name) .name = #_name,
-#define AP_FAST_NAME_INITIALIZER(_clazz,_name) .name = #_name "*",
-#else
+#if AP_SCHEDULER_EXTENDED_TASKINFO_ENABLED
 #define AP_SCHEDULER_NAME_INITIALIZER(_clazz,_name) .name = #_clazz "::" #_name,
 #define AP_FAST_NAME_INITIALIZER(_clazz,_name) .name = #_clazz "::" #_name "*",
+#else
+#define AP_SCHEDULER_NAME_INITIALIZER(_clazz,_name) .name = #_name,
+#define AP_FAST_NAME_INITIALIZER(_clazz,_name) .name = #_name "*",
 #endif
 #define LOOP_RATE 0
 
@@ -123,6 +121,7 @@ public:
 
     // return current tick counter
     uint16_t ticks() const { return _tick_counter; }
+    uint32_t ticks32() const { return _tick_counter32; }
 
     // run the tasks. Call this once per 'tick'.
     // time_available is the amount of time available to run
@@ -177,6 +176,11 @@ public:
         return _last_loop_time_s;
     }
 
+    // get the time in microseconds that the current loop started
+    uint64_t get_loop_start_time_us(void) const {
+        return _loop_sample_time_us;
+    }
+
     // get the amount of extra time being added on each loop
     uint32_t get_extra_loop_us(void) const {
         return extra_loop_us;
@@ -224,6 +228,7 @@ private:
     // number of 'ticks' that have passed (number of times that
     // tick() has been called
     uint16_t _tick_counter;
+    uint32_t _tick_counter32;
 
     // tick counter at the time we last ran each task
     uint16_t *_last_run;
@@ -240,12 +245,15 @@ private:
     // number of ticks that _spare_micros is counted over
     uint8_t _spare_ticks;
 
-    // start of loop timing
+    // start of previous loop
     uint32_t _loop_timer_start_us;
 
     // time of last loop in seconds
     float _last_loop_time_s;
-    
+
+    // start of current loop
+    uint64_t _loop_sample_time_us;
+
     // bitmask bit which indicates if we should log PERF message
     uint32_t _log_performance_bit;
 
@@ -270,3 +278,5 @@ private:
 namespace AP {
     AP_Scheduler &scheduler();
 };
+
+#endif  // AP_SCHEDULER_ENABLED

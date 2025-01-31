@@ -20,10 +20,10 @@
 #include <AP_Motors/AP_Motors.h>
 #include <AP_Baro/AP_Baro.h>
 #include <AP_Filesystem/AP_Filesystem.h>
+#include "SIM_Aircraft.h"
 
 #include <stdio.h>
 #include <sys/stat.h>
-
 
 using namespace SITL;
 
@@ -87,6 +87,14 @@ static Motor tiltquad_h_vectored_motors[] =
     Motor(AP_MOTORS_MOT_2, -135, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  3, -1, 0, 0, 8, 10, -90),
     Motor(AP_MOTORS_MOT_3,  -45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 4, -1, 0, 0, 8, 10, -90),
     Motor(AP_MOTORS_MOT_4,  135, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2, -1, 0, 0, 7, 10, -90),
+};
+
+static Motor tiltquad[] =
+{
+    Motor(AP_MOTORS_MOT_1,   45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW,  1, -1, 0, 0, 7, 10, -90),
+    Motor(AP_MOTORS_MOT_2, -135, AP_MOTORS_MATRIX_YAW_FACTOR_CCW,  3),
+    Motor(AP_MOTORS_MOT_3,  -45, AP_MOTORS_MATRIX_YAW_FACTOR_CW,   4, -1, 0, 0, 8, 10, -90),
+    Motor(AP_MOTORS_MOT_4,  135, AP_MOTORS_MATRIX_YAW_FACTOR_CW,   2),
 };
 
 static Motor hexa_motors[] =
@@ -308,21 +316,16 @@ static Frame supported_frames[] =
     Frame("tilttrivec",3, tilttri_vectored_motors),
     Frame("tilttri",   3, tilttri_motors),
     Frame("y6",        6, y6_motors),
-    Frame("firefly",   6, firefly_motors)
+    Frame("firefly",   6, firefly_motors),
+    Frame("tilt",      4, tiltquad),
 };
 
 // get air density in kg/m^3
 float Frame::get_air_density(float alt_amsl) const
 {
-    float sigma, delta, theta;
-
-    AP_Baro::SimpleAtmosphere(alt_amsl * 0.001f, sigma, delta, theta);
-
-    const float air_pressure = SSL_AIR_PRESSURE * delta;
-    return air_pressure / (ISA_GAS_CONSTANT * (C_TO_KELVIN(model.refTempC)));
+    return AP_Baro::get_air_density_for_alt_amsl(alt_amsl);
 }
 
-#if USE_PICOJSON
 /*
   load frame specific parameters from a json file if available
  */
@@ -341,39 +344,9 @@ void Frame::load_frame_params(const char *model_json)
     if (fname == nullptr) {
         AP_HAL::panic("%s failed to load\n", model_json);
     }
-    ::printf("Loading model %s\n", fname);
-    int fd = AP::FS().open(model_json, O_RDONLY);
-    if (fd == -1) {
+    AP_JSON::value *obj = AP_JSON::load_json(model_json);
+    if (obj == nullptr) {
         AP_HAL::panic("%s failed to load\n", model_json);
-    }
-    char buf[st.st_size+1];
-    memset(buf, '\0', sizeof(buf));
-    if (AP::FS().read(fd, buf, st.st_size) != st.st_size) {
-        AP_HAL::panic("%s failed to load\n", model_json);
-    }
-    AP::FS().close(fd);
-
-    char *start = strchr(buf, '{');
-    if (!start) {
-        AP_HAL::panic("Invalid json %s", model_json);
-    }
-    free(fname);
-
-    /*
-      remove comments, as not allowed by the parser
-     */
-    for (char *p = strchr(start,'#'); p; p=strchr(p+1, '#')) {
-        // clear to end of line
-        do {
-            *p++ = ' ';
-        } while (*p != '\n' && *p != '\r' && *p);
-    }
-
-    picojson::value obj;
-    std::string err = picojson::parse(obj, start);
-    if (!err.empty()) {
-        AP_HAL::panic("Failed to load %s: %s", model_json, err.c_str());
-        exit(1);
     }
 
     enum class VarType {
@@ -415,8 +388,8 @@ void Frame::load_frame_params(const char *model_json)
     };
 
     for (uint8_t i=0; i<ARRAY_SIZE(vars); i++) {
-        auto v = obj.get(vars[i].label);
-        if (v.is<picojson::null>()) {
+        auto v = obj->get(vars[i].label);
+        if (v.is<AP_JSON::null>()) {
             // use default value
             continue;
         }
@@ -437,13 +410,13 @@ void Frame::load_frame_params(const char *model_json)
     char label_name[20];
     for (uint8_t i=0; i<ARRAY_SIZE(per_motor_vars); i++) {
         for (uint8_t j=0; j<12; j++) {
-            sprintf(label_name, "motor%i_%s", j+1, per_motor_vars[i].label);
-            auto v = obj.get(label_name);
-            if (v.is<picojson::null>()) {
+            snprintf(label_name, 20, "motor%i_%s", j+1, per_motor_vars[i].label);
+            auto v = obj->get(label_name);
+            if (v.is<AP_JSON::null>()) {
                 // use default value
                 continue;
             }
-            if (vars[i].t == VarType::FLOAT) {
+            if (per_motor_vars[i].t == VarType::FLOAT) {
                 parse_float(v, label_name, *(((float *)per_motor_vars[i].ptr) + j));
 
             } else if (per_motor_vars[i].t == VarType::VECTOR3F) {
@@ -452,18 +425,20 @@ void Frame::load_frame_params(const char *model_json)
         }
     }
 
+    delete obj;
+
     ::printf("Loaded model params from %s\n", model_json);
 }
 
-void Frame::parse_float(picojson::value val, const char* label, float &param) {
+void Frame::parse_float(AP_JSON::value val, const char* label, float &param) {
     if (!val.is<double>()) {
         AP_HAL::panic("Bad json type for %s: %s", label, val.to_str().c_str());
     }
     param = val.get<double>();
 }
 
-void Frame::parse_vector3(picojson::value val, const char* label, Vector3f &param) {
-    if (!val.is<picojson::array>() || !val.contains(2) || val.contains(3)) {
+void Frame::parse_vector3(AP_JSON::value val, const char* label, Vector3f &param) {
+    if (!val.is<AP_JSON::value::array>() || !val.contains(2) || val.contains(3)) {
         AP_HAL::panic("Bad json type for %s: %s", label, val.to_str().c_str());
     }
     for (uint8_t j=0; j<3; j++) {
@@ -471,24 +446,21 @@ void Frame::parse_vector3(picojson::value val, const char* label, Vector3f &para
     }
 }
 
-#endif
+#if AP_SIM_ENABLED
 
 /*
   initialise the frame
  */
-#if AP_SIM_ENABLED
 void Frame::init(const char *frame_str, Battery *_battery)
 {
     model = default_model;
     battery = _battery;
 
-#if USE_PICOJSON
     const char *colon = strchr(frame_str, ':');
     size_t slen = strlen(frame_str);
     if (colon != nullptr && slen > 5 && strcmp(&frame_str[slen-5], ".json") == 0) {
         load_frame_params(colon+1);
     }
-#endif
     mass = model.mass;
 
     const float drag_force = model.mass * GRAVITY_MSS * tanf(radians(model.refAngle));
@@ -580,15 +552,14 @@ void Frame::calculate_forces(const Aircraft &aircraft,
 
     Vector3f vel_air_bf = aircraft.get_dcm().transposed() * aircraft.get_velocity_air_ef();
 
-    float current = 0;
+    const auto *_sitl = AP::sitl();
     for (uint8_t i=0; i<num_motors; i++) {
         Vector3f mtorque, mthrust;
         motors[i].calculate_forces(input, motor_offset, mtorque, mthrust, vel_air_bf, gyro, air_density, battery->get_voltage(), use_drag);
-        current += motors[i].get_current();
         torque += mtorque;
         thrust += mthrust;
         // simulate motor rpm
-        if (!is_zero(AP::sitl()->vibe_motor)) {
+        if (!is_zero(_sitl->vibe_motor)) {
             rpm[motor_offset+i] = motors[i].get_command() * AP::sitl()->vibe_motor * 60.0f;
         }
     }

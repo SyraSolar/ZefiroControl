@@ -7,8 +7,8 @@ void ModeManualK::update()
     SRV_Channels::set_output_scaled(SRV_Channel::k_elevator, plane.pitch_in_expo(false));
     plane.steering_control.steering = plane.steering_control.rudder = plane.rudder_in_expo(false);
 
-    plane.nav_roll_cd = plane.ahrs.roll_sensor;
-    plane.nav_pitch_cd = plane.ahrs.pitch_sensor;
+    plane.nav_roll_cd = plane.AP::ahrs.roll_sensor;
+    plane.nav_pitch_cd = plane.AP::ahrs.pitch_sensor;
 }
 */
 
@@ -39,6 +39,7 @@ static AP_SerialManager serial_manager;
 
 //static uint16_t pwm = 1500;
 //static int8_t delta = 1;
+
 
 bool ModeManualK::_enter()
 {
@@ -105,7 +106,7 @@ void ModeManualK::update()
                                         (double)ground_speed);*/
     }
     
-    plane.barometer.accumulate();
+    //plane.barometer.accumulate();
     plane.barometer.update();
     
     zefiroControl.set_RHO(plane.barometer.get_pressure());
@@ -125,15 +126,15 @@ void ModeManualK::update()
     
     //plane.steering_control.steering = plane.steering_control.rudder = plane.rudder_in_expo(false);
     
-    ahrs().update();
-    float pitch = ahrs().get_pitch(); // Get pitch angle in degrees
-    float yaw = ahrs().get_yaw(); // Get yaw angle in degrees
-    float roll = ahrs().get_roll(); // Get roll angle in degrees
+    AP::ahrs().update();
+    float pitch = AP::ahrs().get_pitch(); // Get pitch angle in degrees
+    float yaw = AP::ahrs().get_yaw(); // Get yaw angle in degrees
+    float roll = AP::ahrs().get_roll(); // Get roll angle in degrees
     
     //GCS_SEND_TEXT(MAV_SEVERITY_INFO, "pitch: %f --- yaw: %f --- roll: %f", pitch, yaw, roll);
     
     // Read angular rates for roll, pitch, and yaw
-    Vector3f angular_gyro = ahrs().get_gyro();
+    Vector3f angular_gyro = AP::ahrs().get_gyro();
     float angular_pitch = angular_gyro.x; // Get angular rate for pitch in degrees per second
     float angular_roll = angular_gyro.y; // Get angular rate for roll in degrees per second
     float angular_yaw = angular_gyro.z; // Get angular rate for yaw in degrees per second
@@ -142,10 +143,14 @@ void ModeManualK::update()
     
     //zefiroControl.update(double U_longit_speed, double V_lateral_speed, double W_vertical_speed,
     //    double P_v_roll, double Q_v_pitch, double R_v_yaw, double Roll, double Pitch, double Yaw);
-    double wind_direction = plane.g2.windvane.get_apparent_wind_direction_rad();
-    double wind_speed = plane.g2.windvane.get_apparent_wind_speed();
-    double vx = wind_speed * cosf(wind_direction);
-    double vy = wind_speed * sinf(wind_direction);
+    
+    
+    Vector3f wind;
+    //double wind_direction = AP::windvane()->get_apparent_wind_direction_rad();
+    //double wind_speed = wind.xy().length(); // Magnitude da velocidade do vento
+    double vx = -wind.x;
+    double vy = -wind.y;
+
     
     double U_longit_speed = vx;
     double V_lateral_speed = vy;
@@ -279,8 +284,8 @@ void ModeManualK::update()
         SRV_Channels::move_servo(SRV_Channel::k_motor4, 0, min_motor, max_motor);
     }
 
-    //plane.nav_roll_cd = plane.ahrs.roll_sensor;
-    //plane.nav_pitch_cd = plane.ahrs.pitch_sensor;
+    //plane.nav_roll_cd = plane.AP::ahrs.roll_sensor;
+    //plane.nav_pitch_cd = plane.AP::ahrs.pitch_sensor;
     //zefiroControl.TCA9548A(0);
     
 }

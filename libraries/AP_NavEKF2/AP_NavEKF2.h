@@ -129,13 +129,13 @@ public:
     // If a calculated location isn't available, return a raw GPS measurement
     // The status will return true if a calculation or raw measurement is available
     // The getFilterStatus() function provides a more detailed description of data health and must be checked if data is to be used for flight control
-    bool getLLH(struct Location &loc) const;
+    bool getLLH(Location &loc) const;
 
     // Return the latitude and longitude and height used to set the NED origin for the specified instance
     // An out of range instance (eg -1) returns data for the primary instance
     // All NED positions calculated by the filter are relative to this location
     // Returns false if the origin has not been set
-    bool getOriginLLH(struct Location &loc) const;
+    bool getOriginLLH(Location &loc) const;
 
     // set the latitude and longitude and height used to set the NED origin
     // All NED positions calculated by the filter will be relative to this location
@@ -364,7 +364,18 @@ private:
     AP_Int8 _gsfRunMask;            // mask controlling which EKF2 instances run a separate EKF-GSF yaw estimator
     AP_Int8 _gsfUseMask;            // mask controlling which EKF2 instances will use EKF-GSF yaw estimator data to assit with yaw resets
     AP_Int8 _gsfResetMaxCount;      // maximum number of times the EKF2 is allowed to reset it's yaw to the EKF-GSF estimate
+    AP_Int32 _options;              // optional behaviour bitmask
 
+    // enum for processing options
+    enum class Option {
+        DisableExternalNav     = (1U<<0),
+    };
+
+    // return true if an option is set
+    bool option_is_set(Option option) const {
+        return (uint32_t(option) & uint32_t(_options)) != 0;
+    }
+    
 // Possible values for _flowUse
 #define FLOW_USE_NONE    0
 #define FLOW_USE_NAV     1
@@ -399,7 +410,7 @@ private:
     const float maxYawEstVelInnov = 2.0f;          // Maximum acceptable length of the velocity innovation returned by the EKF-GSF yaw estimator (m/s)
 
     // origin set by one of the cores
-    struct Location common_EKF_origin;
+    Location common_EKF_origin;
     bool common_origin_valid;
 
     // time at start of current filter update
@@ -442,15 +453,6 @@ private:
         NO_MEM, 
         NO_SETUP,
         NUM_INIT_FAILURES
-    };
-    // initialization failure reasons
-    const char* initFailureReason[int(InitFailures::NUM_INIT_FAILURES)] {
-        "EKF2: unknown initialization failure",
-        "EKF2: EK2_enable is false",
-        "EKF2: no IMUs available",
-        "EKF2: EK2_IMU_MASK is zero",
-        "EKF2: insufficient memory available",
-        "EKF2: core setup failed"
     };
     InitFailures initFailure;
 

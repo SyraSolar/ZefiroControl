@@ -1,6 +1,9 @@
-#include <AP_HAL/AP_HAL.h>
+#include "AP_NavEKF2.h"
 
 #include "AP_NavEKF2_core.h"
+
+#include <AP_DAL/AP_DAL.h>
+#include <AP_HAL/AP_HAL.h>
 #include <GCS_MAVLink/GCS.h>
 #include <AP_Logger/AP_Logger.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
@@ -598,6 +601,13 @@ const AP_Param::GroupInfo NavEKF2::var_info[] = {
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO("GSF_RST_MAX", 57, NavEKF2, _gsfResetMaxCount, 2),
+
+    // @Param: OPTIONS
+    // @DisplayName: Optional EKF behaviour
+    // @Description: optional EKF2 behaviour. Disabling external navigation prevents use of external vision data in the EKF2 solution
+    // @Bitmask: 0:DisableExternalNavigation
+    // @User: Advanced
+    AP_GROUPINFO("OPTIONS",  58, NavEKF2, _options, 0),
     
     AP_GROUPEND
 };
@@ -643,7 +653,7 @@ bool NavEKF2::InitialiseFilter(void)
 
         // don't allow more filters than IMUs
         uint8_t mask = (1U<<ins.get_accel_count())-1;
-        _imuMask.set(_imuMask.get() & mask);
+        _imuMask.set_and_default(_imuMask.get() & mask);
         
         // count IMUs from mask
         num_cores = __builtin_popcount(_imuMask);
@@ -662,15 +672,17 @@ bool NavEKF2::InitialiseFilter(void)
         if (AP::dal().available_memory() < sizeof(NavEKF2_core)*num_cores + 4096) {
             initFailure = InitFailures::NO_MEM;
             core_malloc_failed = true;
+            num_cores = 0;
             GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "NavEKF2: not enough memory available");
             return false;
         }
 
         // try to allocate from CCM RAM, fallback to Normal RAM if not available or full
-        core = (NavEKF2_core*)AP::dal().malloc_type(sizeof(NavEKF2_core)*num_cores, AP_DAL::MEM_FAST);
+        core = (NavEKF2_core*)AP::dal().malloc_type(sizeof(NavEKF2_core)*num_cores, AP_DAL::MemoryType::FAST);
         if (core == nullptr) {
             initFailure = InitFailures::NO_MEM;
             core_malloc_failed = true;
+            num_cores = 0;
             GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "NavEKF2: memory allocation failed");
             return false;
         }
@@ -686,7 +698,7 @@ bool NavEKF2::InitialiseFilter(void)
             if (_imuMask & (1U<<i)) {
                 if(!core[num_cores].setup_core(i, num_cores)) {
                     // if any core setup fails, free memory, zero the core pointer and abort
-                    hal.util->free_type(core, sizeof(NavEKF2_core)*num_cores, AP_HAL::Util::MEM_FAST);
+                    AP::dal().free_type(core, sizeof(NavEKF2_core)*num_cores, AP_DAL::MemoryType::FAST);
                     core = nullptr;
                     initFailure = InitFailures::NO_SETUP;
                     GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "NavEKF2: core %d setup failed", num_cores);
@@ -878,7 +890,7 @@ bool NavEKF2::pre_arm_check(char *failure_msg, uint8_t failure_msg_len) const
     }
     for (uint8_t i = 0; i < num_cores; i++) {
         if (!core[i].healthy()) {
-            const char *failure = core[primary].prearm_failure_reason();
+            const char *failure = core[i].prearm_failure_reason();
             if (failure != nullptr) {
                 AP::dal().snprintf(failure_msg, failure_msg_len, failure);
             } else {
@@ -1070,7 +1082,7 @@ bool NavEKF2::getMagOffsets(uint8_t mag_idx, Vector3f &magOffsets) const
 // If a calculated location isn't available, return a raw GPS measurement
 // The status will return true if a calculation or raw measurement is available
 // The getFilterStatus() function provides a more detailed description of data health and must be checked if data is to be used for flight control
-bool NavEKF2::getLLH(struct Location &loc) const
+bool NavEKF2::getLLH(Location &loc) const
 {
     if (!core) {
         return false;
@@ -1082,10 +1094,14 @@ bool NavEKF2::getLLH(struct Location &loc) const
 // An out of range instance (eg -1) returns data for the primary instance
 // All NED positions calculated by the filter are relative to this location
 // Returns false if the origin has not been set
-bool NavEKF2::getOriginLLH(struct Location &loc) const
+bool NavEKF2::getOriginLLH(Location &loc) const
 {
     if (!core) {
         return false;
+    }
+    if (common_origin_valid) {
+        loc = common_EKF_origin;
+        return true;
     }
     return core[primary].getOriginLLH(loc);
 }
@@ -1101,11 +1117,9 @@ bool NavEKF2::setOriginLLH(const Location &loc)
     if (!core) {
         return false;
     }
-    if (_fusionModeGPS != 3 || common_origin_valid) {
-        // we don't allow setting of the EKF origin if using GPS
-        // or if the EKF origin has already been set.
-        // This is to prevent accidental setting of EKF origin with an
-        // invalid position or height or causing upsets from a shifting origin.
+    if (common_origin_valid) {
+        // we don't allow setting of the EKF origin if the EKF origin
+        // has already been set.
         GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "EKF2 refusing set origin");
         return false;
     }
@@ -1512,8 +1526,7 @@ void NavEKF2::updateLaneSwitchPosDownResetData(uint8_t new_primary, uint8_t old_
 void NavEKF2::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
 {
     AP::dal().writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, delay_ms, resetTime_ms);
-
-    if (core) {
+    if (!option_is_set(Option::DisableExternalNav) && core) {
         for (uint8_t i=0; i<num_cores; i++) {
             core[i].writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, delay_ms, resetTime_ms);
         }
@@ -1566,8 +1579,7 @@ void NavEKF2::writeDefaultAirSpeed(float airspeed)
 void NavEKF2::writeExtNavVelData(const Vector3f &vel, float err, uint32_t timeStamp_ms, uint16_t delay_ms)
 {
     AP::dal().writeExtNavVelData(vel, err, timeStamp_ms, delay_ms);
-
-    if (core) {
+    if (!option_is_set(Option::DisableExternalNav) && core) {
         for (uint8_t i=0; i<num_cores; i++) {
             core[i].writeExtNavVelData(vel, err, timeStamp_ms, delay_ms);
         }

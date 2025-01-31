@@ -21,7 +21,6 @@
  */
 
 #include "AP_AHRS.h"
-#include <AP_Motors/AP_Motors.h>
 
 // fwd declarations to avoid include errors
 class AC_AttitudeControl;
@@ -85,7 +84,7 @@ public:
       wrappers around ahrs functions which pass-thru directly. See
       AP_AHRS.h for description of each function
      */
-    bool get_location(struct Location &loc) const WARN_IF_UNUSED {
+    bool get_location(Location &loc) const WARN_IF_UNUSED {
         return ahrs.get_location(loc);
     }
 
@@ -175,8 +174,6 @@ public:
 
     // Logging Functions
     void Write_AttitudeView(const Vector3f &targets) const;    
-    void Write_Rate( const AP_Motors &motors, const AC_AttitudeControl &attitude_control,
-                        const AC_PosControl &pos_control) const;
 
     float roll;
     float pitch;
