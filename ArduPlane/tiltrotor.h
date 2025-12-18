@@ -16,7 +16,6 @@
 
 #include <AP_Param/AP_Param.h>
 #include "transition.h"
-#include <AP_Logger/LogStructure.h>
 
 class QuadPlane;
 class AP_MotorsMulticopter;
@@ -46,7 +45,7 @@ public:
     bool tilt_over_max_angle(void) const;
 
     bool is_motor_tilting(uint8_t motor) const {
-        return tilt_mask.get() & (1U<<motor);
+        return (((uint8_t)tilt_mask.get()) & (1U<<motor));
     }
 
     bool fully_fwd() const;
@@ -69,9 +68,6 @@ public:
     // true if the tilts have completed slewing
     // always return true if not enabled or not a continuous type
     bool tilt_angle_achieved() const { return !enabled() || (type != TILT_TYPE_CONTINUOUS) || angle_achieved; }
-
-    // Write tiltrotor specific log
-    void write_log();
 
     AP_Int8 enable;
     AP_Int16 tilt_mask;
@@ -101,15 +97,6 @@ public:
     static const struct AP_Param::GroupInfo var_info[];
 
 private:
-
-    // Tiltrotor specific log message
-    struct PACKED log_tiltrotor {
-        LOG_PACKET_HEADER;
-        uint64_t time_us;
-        float current_tilt;
-        float front_left_tilt;
-        float front_right_tilt;
-    };
 
     bool setup_complete;
 

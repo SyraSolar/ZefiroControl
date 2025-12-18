@@ -101,6 +101,8 @@ void Plane::failsafe_short_on_event(enum failsafe_state fstype, ModeReason reaso
         break;
     case Mode::Number::MANUALK:
         break;
+    case Mode::Number::MANUAL_HOVER:
+        break;
     }
     if (failsafe.saved_mode_number != control_mode->mode_number()) {
         gcs().send_text(MAV_SEVERITY_WARNING, "RC Short Failsafe: switched to %s", control_mode->name());
@@ -111,7 +113,6 @@ void Plane::failsafe_short_on_event(enum failsafe_state fstype, ModeReason reaso
 
 void Plane::failsafe_long_on_event(enum failsafe_state fstype, ModeReason reason)
 {
-
     // This is how to handle a long loss of control signal failsafe.
     //  If the GCS is locked up we allow control to revert to RC
     RC_Channels::clear_overrides();
@@ -129,26 +130,16 @@ void Plane::failsafe_long_on_event(enum failsafe_state fstype, ModeReason reason
     case Mode::Number::CIRCLE:
     case Mode::Number::LOITER:
     case Mode::Number::THERMAL:
-    case Mode::Number::TAKEOFF:
-        if (plane.flight_stage == AP_FixedWing::FlightStage::TAKEOFF && !(g.fs_action_long == FS_ACTION_LONG_GLIDE || g.fs_action_long == FS_ACTION_LONG_PARACHUTE)) {
-            // don't failsafe if in inital climb of TAKEOFF mode and FS action is not parachute or glide
-            // long failsafe will be re-called if still in fs after initial climb
-            long_failsafe_pending = true;
-            break;
-        }
-
         if(plane.emergency_landing) {
             set_mode(mode_fbwa, reason); // emergency landing switch overrides normal action to allow out of range landing
             break;
         }
         if(g.fs_action_long == FS_ACTION_LONG_PARACHUTE) {
-#if HAL_PARACHUTE_ENABLED
+#if PARACHUTE == ENABLED
             parachute_release();
 #endif
         } else if (g.fs_action_long == FS_ACTION_LONG_GLIDE) {
             set_mode(mode_fbwa, reason);
-        } else if (g.fs_action_long == FS_ACTION_LONG_AUTO) {
-            set_mode(mode_auto, reason);
         } else {
             set_mode(mode_rtl, reason);
         }
@@ -177,47 +168,35 @@ void Plane::failsafe_long_on_event(enum failsafe_state fstype, ModeReason reason
             // don't failsafe in a landing sequence
             break;
         }
-
-#if HAL_QUADPLANE_ENABLED
-        if (quadplane.in_vtol_takeoff()) {
-            set_mode(mode_qland, reason);
-            // QLAND if in VTOL takeoff
-            break;
-        }
-#endif
         FALLTHROUGH;
 
     case Mode::Number::AVOID_ADSB:
     case Mode::Number::GUIDED:
-
         if(g.fs_action_long == FS_ACTION_LONG_PARACHUTE) {
-#if HAL_PARACHUTE_ENABLED
+#if PARACHUTE == ENABLED
             parachute_release();
 #endif
         } else if (g.fs_action_long == FS_ACTION_LONG_GLIDE) {
             set_mode(mode_fbwa, reason);
-        } else if (g.fs_action_long == FS_ACTION_LONG_AUTO) {
-            set_mode(mode_auto, reason);
         } else if (g.fs_action_long == FS_ACTION_LONG_RTL) {
             set_mode(mode_rtl, reason);
         }
         break;
 
     case Mode::Number::RTL:
-        if (g.fs_action_long == FS_ACTION_LONG_AUTO) {
-            set_mode(mode_auto, reason);
-        }
-        break;
 #if HAL_QUADPLANE_ENABLED
     case Mode::Number::QLAND:
     case Mode::Number::QRTL:
     case Mode::Number::LOITER_ALT_QLAND:
 #endif
+    case Mode::Number::TAKEOFF:
     case Mode::Number::INITIALISING:
         break;
     case Mode::Number::HOVERING:
         break;
     case Mode::Number::MANUALK:
+        break;
+    case Mode::Number::MANUAL_HOVER:
         break;
     }
     gcs().send_text(MAV_SEVERITY_WARNING, "%s Failsafe On: %s", (reason == ModeReason:: GCS_FAILSAFE) ? "GCS" : "RC Long", control_mode->name());
@@ -237,7 +216,6 @@ void Plane::failsafe_short_off_event(ModeReason reason)
 
 void Plane::failsafe_long_off_event(ModeReason reason)
 {
-    long_failsafe_pending = false;
     // We're back in radio contact with RC or GCS
     if (reason == ModeReason:: GCS_FAILSAFE) {
         gcs().send_text(MAV_SEVERITY_WARNING, "GCS Failsafe Off");
@@ -273,14 +251,14 @@ void Plane::handle_battery_failsafe(const char *type_str, const int8_t action)
                 already_landing = true;
             }
 #endif
-            if (!already_landing && plane.have_position) {
+            if (!already_landing) {
                 // never stop a landing if we were already committed
-                if (plane.mission.is_best_land_sequence(plane.current_loc)) {
+                if (plane.mission.is_best_land_sequence()) {
                     // continue mission as it will reach a landing in less distance
                     plane.mission.set_in_landing_sequence_flag(true);
                     break;
                 }
-                if (plane.mission.jump_to_landing_sequence(plane.current_loc)) {
+                if (plane.mission.jump_to_landing_sequence()) {
                     plane.set_mode(mode_auto, ModeReason::BATTERY_FAILSAFE);
                     break;
                 }
@@ -297,7 +275,7 @@ void Plane::handle_battery_failsafe(const char *type_str, const int8_t action)
 #endif
             if (!already_landing) {
                 // never stop a landing if we were already committed
-                if ((g.rtl_autoland == RtlAutoland::RTL_IMMEDIATE_DO_LAND_START) && plane.have_position && plane.mission.is_best_land_sequence(plane.current_loc)) {
+                if (g.rtl_autoland == RtlAutoland::RTL_IMMEDIATE_DO_LAND_START && plane.mission.is_best_land_sequence()) {
                     // continue mission as it will reach a landing in less distance
                     plane.mission.set_in_landing_sequence_flag(true);
                     break;
@@ -309,7 +287,7 @@ void Plane::handle_battery_failsafe(const char *type_str, const int8_t action)
         }
 
         case Failsafe_Action_Terminate:
-#if AP_ADVANCEDFAILSAFE_ENABLED
+#if ADVANCED_FAILSAFE == ENABLED
             char battery_type_str[17];
             snprintf(battery_type_str, 17, "%s battery", type_str);
             afs.gcs_terminate(true, battery_type_str);
@@ -319,7 +297,7 @@ void Plane::handle_battery_failsafe(const char *type_str, const int8_t action)
             break;
 
         case Failsafe_Action_Parachute:
-#if HAL_PARACHUTE_ENABLED
+#if PARACHUTE == ENABLED
             parachute_release();
 #endif
             break;

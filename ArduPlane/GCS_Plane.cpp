@@ -91,6 +91,8 @@ void GCS_Plane::update_vehicle_sensor_status_flags(void)
         break;
     case Mode::Number::MANUALK:
         break;
+    case Mode::Number::MANUAL_HOVER:
+        break;
     }
 
     if (rate_controlled) {
@@ -100,6 +102,13 @@ void GCS_Plane::update_vehicle_sensor_status_flags(void)
     if (attitude_stabilized) {
         control_sensors_enabled |= MAV_SYS_STATUS_SENSOR_ATTITUDE_STABILIZATION;
         control_sensors_health |= MAV_SYS_STATUS_SENSOR_ATTITUDE_STABILIZATION;
+    }
+
+    control_sensors_present |= MAV_SYS_STATUS_SENSOR_RC_RECEIVER;
+    control_sensors_enabled |= MAV_SYS_STATUS_SENSOR_RC_RECEIVER;
+    uint32_t last_valid = plane.failsafe.last_valid_rc_ms;
+    if (millis() - last_valid < 200) {
+        control_sensors_health |= MAV_SYS_STATUS_SENSOR_RC_RECEIVER;
     }
 
 #if AP_TERRAIN_AVAILABLE
@@ -118,16 +127,14 @@ void GCS_Plane::update_vehicle_sensor_status_flags(void)
     }
 #endif
 
-#if AP_RANGEFINDER_ENABLED
     const RangeFinder *rangefinder = RangeFinder::get_singleton();
-    if (rangefinder && rangefinder->has_orientation(plane.rangefinder_orientation())) {
+    if (rangefinder && rangefinder->has_orientation(ROTATION_PITCH_270)) {
         control_sensors_present |= MAV_SYS_STATUS_SENSOR_LASER_POSITION;
         if (plane.g.rangefinder_landing) {
             control_sensors_enabled |= MAV_SYS_STATUS_SENSOR_LASER_POSITION;
         }
-        if (rangefinder->has_data_orient(plane.rangefinder_orientation())) {
+        if (rangefinder->has_data_orient(ROTATION_PITCH_270)) {
             control_sensors_health |= MAV_SYS_STATUS_SENSOR_LASER_POSITION;            
         }
     }
-#endif
 }

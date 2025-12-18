@@ -1,5 +1,7 @@
 #include "mode.h"
 #include "Plane.h"
+#include "zef_actuator.h"
+#include "zef_control.h"
 
 #if HAL_SOARING_ENABLED
 
@@ -8,21 +10,22 @@ bool ModeThermal::_enter()
     if (!plane.g2.soaring_controller.is_active()) {
         return false;
     }
-
-    plane.do_loiter_at_location();
-    plane.loiter_angle_reset();
-
-    plane.g2.soaring_controller.init_thermalling();
-    plane.g2.soaring_controller.get_target(plane.next_WP_loc); // ahead on flight path
-
+    if (!actuador) {
+        actuador = zefActuador::getInstance();
+    }
     return true;
 }
 
 void ModeThermal::update()
 {
-    plane.calc_nav_roll();
-    plane.calc_nav_pitch();
-    plane.calc_throttle();
+
+    double force_vector[12];
+    for (int i = 0; i < 12; i++) {
+        force_vector[i] = 0.0;
+    }
+
+    // Update actuator with force vector
+    actuador->update(force_vector);
 }
 
 void ModeThermal::update_soaring()
